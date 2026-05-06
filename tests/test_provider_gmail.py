@@ -4,8 +4,7 @@ All Gmail API calls are mocked so no real credentials are required.
 """
 
 import base64
-import unittest
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
 
