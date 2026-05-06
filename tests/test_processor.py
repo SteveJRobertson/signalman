@@ -33,15 +33,15 @@ def _sample_emails() -> list[dict]:
     return [
         {
             "id": "msg1",
-            "subject": "URGENT: Server is down",
-            "sender": "ops@example.com",
-            "body": "Production is down, need a response immediately.",
+            "subject": "Interview invitation – please respond by today",
+            "sender": "recruiter@techcorp.com",
+            "body": "We'd like to invite you for an interview. Please confirm your availability by end of day.",
         },
         {
             "id": "msg2",
-            "subject": "Task: Update documentation",
-            "sender": "manager@example.com",
-            "body": "Please update the API docs by end of week.",
+            "subject": "Assignment submission reminder",
+            "sender": "professor@university.edu",
+            "body": "Please submit your coursework by Friday. Let me know if you have any questions.",
         },
         {
             "id": "msg3",
@@ -82,7 +82,7 @@ class TestTriageUrgent:
     def test_urgent_items_returned(self):
         """Items classified as urgent are present in the output."""
         ai_payload = {
-            "urgent": ["Server is down – reply immediately"],
+            "urgent": ["Interview invite from techcorp.com – confirm availability today"],
             "tasks": [],
             "digest": [],
         }
@@ -94,7 +94,7 @@ class TestTriageUrgent:
 
         assert "urgent" in result
         assert len(result["urgent"]) == 1
-        assert "Server is down" in result["urgent"][0]
+        assert "Interview" in result["urgent"][0]
 
     def test_urgent_triggers_api_call(self):
         """Processing emails results in exactly one Ollama API call."""
@@ -117,7 +117,7 @@ class TestTriageTask:
         """Action items classified as tasks are present in the output."""
         ai_payload = {
             "urgent": [],
-            "tasks": ["Update the API docs by end of week"],
+            "tasks": ["Submit coursework by Friday"],
             "digest": [],
         }
         mock_resp = _make_ollama_response(ai_payload)
@@ -128,7 +128,7 @@ class TestTriageTask:
 
         assert "tasks" in result
         assert len(result["tasks"]) == 1
-        assert "API docs" in result["tasks"][0]
+        assert "coursework" in result["tasks"][0]
 
     def test_multiple_tasks_returned(self):
         """Multiple action items are all preserved."""
@@ -256,8 +256,8 @@ class TestApiRequestPayload:
 
         body = mock_post.call_args.kwargs["json"]
         prompt = body["prompt"]
-        assert "URGENT: Server is down" in prompt
-        assert "ops@example.com" in prompt
+        assert "Interview invitation" in prompt
+        assert "recruiter@techcorp.com" in prompt
 
 
 # ---------------------------------------------------------------------------
