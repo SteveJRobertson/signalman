@@ -89,8 +89,8 @@ Copy the example below and fill in your values. The `.env` file is **gitignored*
 
 ```dotenv
 # Required
-SIGNAL_SENDER=+447700900000       # The Signal number registered on this Mac Mini
-SIGNAL_RECIPIENT=+447700900001    # Your personal phone number
+SIGNAL_SENDER=+447700900000       # The Signal number registered on this Mac Mini (replace with your number)
+SIGNAL_RECIPIENT=+447700900001    # Your personal phone number (the number that will receive briefings)
 
 # Optional – override defaults only if needed
 GMAIL_TOKEN_PATH=token.json
