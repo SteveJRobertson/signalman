@@ -1,6 +1,6 @@
 # Signalman
 
-A local, AI-powered Gmail triage agent that runs on a Mac Mini, fetches your unread emails, classifies them with a local LLM (Ollama), and delivers a structured daily briefing to your phone via Signal.
+A local, AI-powered Gmail triage agent that fetches your unread emails, classifies them with a local LLM (Ollama), and delivers a structured daily briefing to your phone via Signal.
 
 ---
 
@@ -17,7 +17,7 @@ Gmail API → provider_gmail.py → processor_ai.py (Ollama) → notifier_signal
 
 ---
 
-## Mac Mini Setup
+## Setup
 
 ### Prerequisites
 
@@ -89,7 +89,7 @@ Copy the example below and fill in your values. The `.env` file is **gitignored*
 
 ```dotenv
 # Required
-SIGNAL_SENDER=+447700900000       # The Signal number registered on this Mac Mini (replace with your number)
+SIGNAL_SENDER=+447700900000       # The Signal number registered on this machine (replace with your number)
 SIGNAL_RECIPIENT=+447700900001    # Your personal phone number (the number that will receive briefings)
 
 # Optional – override defaults only if needed
