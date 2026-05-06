@@ -1,0 +1,61 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+    "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  macOS launchd job for Signalman.
+
+  Install:
+    1. Edit the paths below to match your setup (search for /path/to/signalman).
+    2. Copy this file to ~/Library/LaunchAgents/com.signalman.daily.plist
+    3. Load it:  launchctl load ~/Library/LaunchAgents/com.signalman.daily.plist
+
+  Uninstall:
+    launchctl unload ~/Library/LaunchAgents/com.signalman.daily.plist
+
+  Run manually:
+    launchctl start com.signalman.daily
+
+  Logs:
+    ~/Library/Logs/signalman/signalman.log
+    ~/Library/Logs/signalman/signalman.error.log
+-->
+<plist version="1.0">
+<dict>
+    <!-- Unique identifier for the launchd job -->
+    <key>Label</key>
+    <string>com.signalman.daily</string>
+
+    <!-- Command to run: use the Python interpreter from the project virtualenv -->
+    <key>ProgramArguments</key>
+    <array>
+        <string>/path/to/signalman/.venv/bin/python</string>
+        <string>/path/to/signalman/main.py</string>
+    </array>
+
+    <!-- Run every day at 08:00 local time -->
+    <key>StartCalendarInterval</key>
+    <dict>
+        <key>Hour</key>
+        <integer>8</integer>
+        <key>Minute</key>
+        <integer>0</integer>
+    </dict>
+
+    <!-- Set the working directory so relative paths in .env are resolved correctly -->
+    <key>WorkingDirectory</key>
+    <string>/path/to/signalman</string>
+
+    <!-- Redirect stdout and stderr to log files -->
+    <key>StandardOutPath</key>
+    <string>/Users/yourusername/Library/Logs/signalman/signalman.log</string>
+    <key>StandardErrorPath</key>
+    <string>/Users/yourusername/Library/Logs/signalman/signalman.error.log</string>
+
+    <!-- Ensure signal-cli and system tools are on the PATH -->
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>/usr/local/bin:/usr/bin:/bin:/opt/homebrew/bin</string>
+    </dict>
+</dict>
+</plist>
