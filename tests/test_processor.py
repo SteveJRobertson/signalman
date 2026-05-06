@@ -230,8 +230,7 @@ class TestApiRequestPayload:
             processor = AIProcessor(model="llama3")
             processor.triage(_sample_emails())
 
-        call_kwargs = mock_post.call_args
-        body = call_kwargs[1]["json"] if "json" in call_kwargs[1] else call_kwargs[0][1]
+        body = mock_post.call_args.kwargs["json"]
         assert body["model"] == "llama3"
 
     def test_correct_url_called(self):
@@ -255,8 +254,10 @@ class TestApiRequestPayload:
             processor = AIProcessor()
             processor.triage(_sample_emails())
 
-        body = mock_post.call_args[1]["json"]
-        assert "Server is down" in body["prompt"] or "URGENT" in body["prompt"]
+        body = mock_post.call_args.kwargs["json"]
+        prompt = body["prompt"]
+        assert "URGENT: Server is down" in prompt
+        assert "ops@example.com" in prompt
 
 
 # ---------------------------------------------------------------------------
