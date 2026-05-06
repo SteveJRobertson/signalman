@@ -25,7 +25,8 @@ _SYSTEM_PROMPT = textwrap.dedent("""\
 
     - urgent: Emails that require an immediate response today. This includes anything related to
               job applications (interview invites, offer deadlines, recruiter follow-ups),
-              school or academic matters (assignment deadlines, exam schedules, enrolment),
+              children's school communications as a parent (e.g. paying for milk or school lunches,
+              upcoming assemblies, school trips, packed lunch reminders, permission slips),
               and any email that explicitly asks for a reply or action by end of day.
     - tasks:  Emails that contain clear action items but are not time-critical today
               (e.g. follow-ups, requests with a future deadline, things to schedule).
