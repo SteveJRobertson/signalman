@@ -39,9 +39,9 @@ def _sample_emails() -> list[dict]:
         },
         {
             "id": "msg2",
-            "subject": "Assignment submission reminder",
-            "sender": "professor@university.edu",
-            "body": "Please submit your coursework by Friday. Let me know if you have any questions.",
+            "subject": "School trip permission slip – action required",
+            "sender": "admin@primaryschool.edu",
+            "body": "Please return the permission slip and payment for the upcoming school trip by Friday.",
         },
         {
             "id": "msg3",
@@ -117,7 +117,7 @@ class TestTriageTask:
         """Action items classified as tasks are present in the output."""
         ai_payload = {
             "urgent": [],
-            "tasks": ["Submit coursework by Friday"],
+            "tasks": ["Return school trip permission slip and payment by Friday"],
             "digest": [],
         }
         mock_resp = _make_ollama_response(ai_payload)
@@ -128,7 +128,7 @@ class TestTriageTask:
 
         assert "tasks" in result
         assert len(result["tasks"]) == 1
-        assert "coursework" in result["tasks"][0]
+        assert "school trip" in result["tasks"][0]
 
     def test_multiple_tasks_returned(self):
         """Multiple action items are all preserved."""
