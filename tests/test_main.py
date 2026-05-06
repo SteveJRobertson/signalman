@@ -48,7 +48,7 @@ class TestRunSuccess:
             emails = _sample_emails()
         if triage is None:
             triage = _sample_triage()
-        base_env = {
+        base_env: dict[str, str] = {
             "SIGNAL_SENDER": "+10000000001",
             "SIGNAL_RECIPIENT": "+10000000002",
         }
@@ -157,9 +157,7 @@ class TestRunSuccess:
 class TestMissingEnvVars:
     def test_missing_signal_sender_exits(self):
         """run() must exit with code 1 when SIGNAL_SENDER is not set."""
-        env_without_sender = {k: v for k, v in {
-            "SIGNAL_RECIPIENT": "+10000000002",
-        }.items()}
+        env_without_sender = {"SIGNAL_RECIPIENT": "+10000000002"}
 
         with (
             patch("main.GmailProvider"),
