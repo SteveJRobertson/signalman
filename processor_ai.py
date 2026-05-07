@@ -87,7 +87,14 @@ class AIProcessor:
     # ------------------------------------------------------------------
 
     def _build_prompt(self, emails: list[dict]) -> str:
-        """Construct the full prompt from the system instructions and emails."""
+        """Construct the full prompt from the system instructions and emails.
+
+        Security note: email content (subject, sender, body) is interpolated
+        directly into the prompt and is not sanitised. A malicious email could
+        attempt prompt injection. This is a known, accepted risk for a local
+        personal-use tool. The impact is limited to the triage output because
+        _parse_response() coerces all values to strings.
+        """
         lines = [_SYSTEM_PROMPT, "Here are the emails to triage:\n"]
         for i, email in enumerate(emails, start=1):
             lines.append(f"--- Email {i} ---")
@@ -104,7 +111,7 @@ class AIProcessor:
             "prompt": prompt,
             "stream": False,
         }
-        response = requests.post(self.url, json=payload)
+        response = requests.post(self.url, json=payload, timeout=120)
         response.raise_for_status()
         return response.json()["response"]
 
@@ -121,7 +128,7 @@ class AIProcessor:
             raise ValueError(f"Failed to parse LLM response as JSON: {exc}\nRaw: {raw}") from exc
 
         return {
-            "urgent": list(data.get("urgent", [])),
-            "tasks": list(data.get("tasks", [])),
-            "digest": list(data.get("digest", [])),
+            "urgent": [str(i) for i in data.get("urgent", [])],
+            "tasks": [str(i) for i in data.get("tasks", [])],
+            "digest": [str(i) for i in data.get("digest", [])],
         }

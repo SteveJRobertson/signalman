@@ -1,40 +1,39 @@
 """Signal notifier for Signalman.
 
 Formats the AI-generated triage JSON into a human-readable message and
-delivers it via signal-cli using a subprocess call.
+delivers it via the Signal REST API running in a Docker container.
 """
 
 from __future__ import annotations
 
-import subprocess
-from typing import Sequence
+import requests
 
 
 class SignalNotifier:
     """Sends a formatted triage briefing to a Signal recipient.
 
     Args:
-        sender:      The Signal account (phone number) used to send the message.
-        recipient:   The phone number (or group ID) that will receive the message.
-        signal_cli:  Path to the ``signal-cli`` executable (default: ``signal-cli``).
+        sender:    The Signal account (phone number) used to send the message.
+        recipient: The phone number that will receive the message.
+        api_url:   Base URL of the Signal REST API (default: ``http://localhost:8080``).
     """
 
     def __init__(
         self,
         sender: str,
         recipient: str,
-        signal_cli: str = "signal-cli",
+        api_url: str = "http://localhost:8080",
     ) -> None:
         self.sender = sender
         self.recipient = recipient
-        self.signal_cli = signal_cli
+        self.api_url = api_url
 
     # ------------------------------------------------------------------
     # Public API
     # ------------------------------------------------------------------
 
     def send(self, triage: dict[str, list[str]]) -> None:
-        """Format *triage* and deliver it via signal-cli.
+        """Format *triage* and deliver it via the Signal REST API.
 
         Args:
             triage: A dict with keys ``urgent``, ``tasks``, and ``digest``,
@@ -42,19 +41,40 @@ class SignalNotifier:
                     (as returned by :class:`~processor_ai.AIProcessor`).
 
         Raises:
-            subprocess.CalledProcessError: If signal-cli exits with a non-zero
-                status code (e.g. the Signal service is unavailable).
-            FileNotFoundError: If the signal-cli executable cannot be found.
+            ConnectionError: If the Signal API Docker container is unreachable.
+            requests.HTTPError: If the API returns a non-2xx response.
         """
+        self._check_reachable()
         message = self.format_message(triage)
-        cmd: Sequence[str] = [
-            self.signal_cli,
-            "-u", self.sender,
-            "send",
-            "-m", message,
-            self.recipient,
-        ]
-        subprocess.run(cmd, check=True, capture_output=True, text=True)
+        payload = {
+            "message": message,
+            "number": self.sender,
+            "recipients": [self.recipient],
+        }
+        response = requests.post(
+            f"{self.api_url}/v2/send",
+            json=payload,
+            timeout=30,
+        )
+        response.raise_for_status()
+
+    # ------------------------------------------------------------------
+    # Private helpers
+    # ------------------------------------------------------------------
+
+    def _check_reachable(self) -> None:
+        """Verify the Signal API container is reachable before sending.
+
+        Raises:
+            ConnectionError: If the container cannot be reached.
+        """
+        try:
+            requests.get(f"{self.api_url}/v1/about", timeout=3)
+        except (requests.exceptions.ConnectionError, requests.exceptions.Timeout) as exc:
+            raise ConnectionError(
+                f"Signal API container is unreachable at {self.api_url}. "
+                "Make sure the Docker container is running."
+            ) from exc
 
     @staticmethod
     def format_message(triage: dict[str, list[str]]) -> str:

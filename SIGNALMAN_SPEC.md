@@ -10,7 +10,7 @@ A modular Python automation running on a Mac Mini that triages Gmail via a local
 - Testing: pytest (Mandatory test-first approach)
 - Email: Google API Client (Gmail)
 - AI: Ollama (Local API)
-- Messaging: signal-cli (via subprocess)
+- Messaging: Signal REST API (Docker container: `bbernhard/signal-cli-rest-api`)
 
 ## 3. Modular Architecture (For Future Growth)
 
@@ -24,9 +24,9 @@ A modular Python automation running on a Mac Mini that triages Gmail via a local
 1. Fetch: Retrieve unread emails from the last 24 hours.
 2. Clean: Strip HTML and signatures to save LLM tokens.
 3. Triage: Use a local LLM to return a JSON-structured summary:
-    - `urgent`: Items requiring a reply today.
-    - `tasks`: Action items identified in text.
-    - `digest`: Brief summaries of lower-priority info.
+   - `urgent`: Items requiring a reply today.
+   - `tasks`: Action items identified in text.
+   - `digest`: Brief summaries of lower-priority info.
 4. Send: Format the JSON into a clean, human-readable Signal message.
 
 ## 5. Test-First Requirements
@@ -35,4 +35,4 @@ The project must include a `tests/` directory with:
 
 - **Mocked Gmail Tests**: Ensure the fetcher handles empty inboxes and malformed emails.
 - **Mocked AI Tests**: Ensure the processor correctly handles various LLM response formats.
-- **Signal Interface Tests**: Ensure the subprocess command is constructed correctly.
+- **Signal Interface Tests**: Ensure the HTTP payload is correctly constructed and the API endpoint is called.
