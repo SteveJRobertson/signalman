@@ -54,7 +54,7 @@ class GmailProvider:
                 creds.refresh(Request())
             else:
                 flow = InstalledAppFlow.from_client_secrets_file(CREDENTIALS_PATH, SCOPES)
-                creds = flow.run_local_server(port=0)
+                creds = flow.run_local_server(host="127.0.0.1", port=0)
             with open(TOKEN_PATH, "w") as token_file:
                 token_file.write(creds.to_json())
 

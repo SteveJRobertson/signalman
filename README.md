@@ -109,7 +109,7 @@ OLLAMA_MODEL=llama3
 ### 8. Test the script manually
 
 ```bash
-python main.py
+python3 main.py
 ```
 
 You should receive a Signal message within a few seconds. Check the terminal for any errors.
