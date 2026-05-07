@@ -19,6 +19,23 @@ import requests
 OLLAMA_URL = "http://localhost:11434/api/generate"
 DEFAULT_MODEL = "llama3"
 
+
+def _normalise_list(value: Any) -> list[str]:
+    """Coerce an LLM-returned field to a flat list of strings.
+
+    Handles the non-deterministic output shapes an LLM may return:
+    - list/tuple  → each element coerced to str
+    - bare string → wrapped in a one-element list (avoids per-char iteration)
+    - None        → empty list
+    - anything else (int, dict, …) → wrapped as a single str
+    """
+    if isinstance(value, (list, tuple)):
+        return [str(i) for i in value]
+    if value is None:
+        return []
+    return [str(value)]
+
+
 _SYSTEM_PROMPT = textwrap.dedent("""\
     You are an email triage assistant. You will be given a list of emails.
     Your job is to classify each email into exactly one of three categories:
@@ -87,7 +104,14 @@ class AIProcessor:
     # ------------------------------------------------------------------
 
     def _build_prompt(self, emails: list[dict]) -> str:
-        """Construct the full prompt from the system instructions and emails."""
+        """Construct the full prompt from the system instructions and emails.
+
+        Security note: email content (subject, sender, body) is interpolated
+        directly into the prompt and is not sanitised. A malicious email could
+        attempt prompt injection. This is a known, accepted risk for a local
+        personal-use tool. The impact is limited to the triage output because
+        _parse_response() coerces all values to strings.
+        """
         lines = [_SYSTEM_PROMPT, "Here are the emails to triage:\n"]
         for i, email in enumerate(emails, start=1):
             lines.append(f"--- Email {i} ---")
@@ -104,7 +128,7 @@ class AIProcessor:
             "prompt": prompt,
             "stream": False,
         }
-        response = requests.post(self.url, json=payload)
+        response = requests.post(self.url, json=payload, timeout=120)
         response.raise_for_status()
         return response.json()["response"]
 
@@ -121,7 +145,7 @@ class AIProcessor:
             raise ValueError(f"Failed to parse LLM response as JSON: {exc}\nRaw: {raw}") from exc
 
         return {
-            "urgent": list(data.get("urgent", [])),
-            "tasks": list(data.get("tasks", [])),
-            "digest": list(data.get("digest", [])),
+            "urgent": _normalise_list(data.get("urgent")),
+            "tasks": _normalise_list(data.get("tasks")),
+            "digest": _normalise_list(data.get("digest")),
         }

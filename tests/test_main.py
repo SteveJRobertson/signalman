@@ -49,8 +49,8 @@ class TestRunSuccess:
         if triage is None:
             triage = _sample_triage()
         base_env: dict[str, str] = {
-            "SIGNAL_SENDER": "+10000000001",
-            "SIGNAL_RECIPIENT": "+10000000002",
+            "SIGNAL_SENDER_NUMBER": "+10000000001",
+            "SIGNAL_RECIPIENT_NUMBER": "+10000000002",
         }
         if env:
             base_env.update(env)
@@ -108,18 +108,17 @@ class TestRunSuccess:
         recipient = kwargs.get("recipient") or (args[1] if len(args) > 1 else None)
         assert recipient == "+10000000002"
 
-    def test_default_signal_cli_path(self):
+    def test_default_signal_api_url(self):
         _, _, mock_signal_cls, *_ = self._run_with_mocks()
         args, kwargs = mock_signal_cls.call_args
-        signal_cli = kwargs.get("signal_cli", "signal-cli")
-        assert signal_cli == "signal-cli"
+        assert kwargs.get("api_url", "http://localhost:8080") == "http://localhost:8080"
 
-    def test_custom_signal_cli_path_from_env(self):
+    def test_custom_signal_api_url_from_env(self):
         _, _, mock_signal_cls, *_ = self._run_with_mocks(
-            env={"SIGNAL_CLI_PATH": "/usr/local/bin/signal-cli"}
+            env={"SIGNAL_API_URL": "http://192.168.1.10:8080"}
         )
         args, kwargs = mock_signal_cls.call_args
-        assert kwargs.get("signal_cli") == "/usr/local/bin/signal-cli"
+        assert kwargs.get("api_url") == "http://192.168.1.10:8080"
 
     def test_default_ollama_url(self):
         _, mock_ai_cls, *_ = self._run_with_mocks()
@@ -156,8 +155,8 @@ class TestRunSuccess:
 
 class TestMissingEnvVars:
     def test_missing_signal_sender_exits(self):
-        """run() must exit with code 1 when SIGNAL_SENDER is not set."""
-        env_without_sender = {"SIGNAL_RECIPIENT": "+10000000002"}
+        """run() must exit with code 1 when SIGNAL_SENDER_NUMBER is not set."""
+        env_without_sender = {"SIGNAL_RECIPIENT_NUMBER": "+10000000002"}
 
         with (
             patch("main.GmailProvider"),
@@ -170,9 +169,9 @@ class TestMissingEnvVars:
                 main.run()
 
     def test_missing_signal_recipient_exits(self):
-        """run() must exit with code 1 when SIGNAL_RECIPIENT is not set."""
+        """run() must exit with code 1 when SIGNAL_RECIPIENT_NUMBER is not set."""
         env_without_recipient = {
-            "SIGNAL_SENDER": "+10000000001",
+            "SIGNAL_SENDER_NUMBER": "+10000000001",
         }
 
         with (
@@ -192,33 +191,31 @@ class TestMissingEnvVars:
 
 class TestMainBlockErrorHandling:
     def test_key_error_causes_sys_exit_1(self, monkeypatch):
-        """A missing env var bubbles up as SystemExit(1) in the __main__ block."""
-        import main
+        """A missing env var causes SystemExit(1) via the real __main__ handler."""
+        import runpy
 
-        monkeypatch.setattr(main, "run", MagicMock(side_effect=KeyError("SIGNAL_SENDER")))
+        monkeypatch.delenv("SIGNAL_SENDER_NUMBER", raising=False)
+        monkeypatch.delenv("SIGNAL_RECIPIENT_NUMBER", raising=False)
 
         with pytest.raises(SystemExit) as exc_info:
-            with patch.object(sys, "argv", ["main.py"]):
-                # Simulate what __main__ does
-                try:
-                    main.run()
-                except KeyError as exc:
-                    main.logger.error("Missing required environment variable: %s", exc)
-                    sys.exit(1)
+            runpy.run_module("main", run_name="__main__", alter_sys=True)
 
         assert exc_info.value.code == 1
 
     def test_generic_exception_causes_sys_exit_1(self, monkeypatch):
-        """Any unexpected exception results in SystemExit(1)."""
-        import main
+        """Any unexpected exception causes SystemExit(1) via the real __main__ handler."""
+        import runpy
+        import provider_gmail
 
-        monkeypatch.setattr(main, "run", MagicMock(side_effect=RuntimeError("boom")))
+        monkeypatch.setenv("SIGNAL_SENDER_NUMBER", "+10000000001")
+        monkeypatch.setenv("SIGNAL_RECIPIENT_NUMBER", "+10000000002")
+        monkeypatch.setattr(
+            provider_gmail.GmailProvider,
+            "from_credentials",
+            MagicMock(side_effect=RuntimeError("boom")),
+        )
 
         with pytest.raises(SystemExit) as exc_info:
-            try:
-                main.run()
-            except Exception as exc:
-                main.logger.error("Signalman failed: %s", exc)
-                sys.exit(1)
+            runpy.run_module("main", run_name="__main__", alter_sys=True)
 
         assert exc_info.value.code == 1

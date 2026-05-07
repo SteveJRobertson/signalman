@@ -1,13 +1,12 @@
 """Tests for the Signal notifier module.
 
-All subprocess calls are mocked so no running signal-cli instance is required.
+All HTTP calls are mocked via requests-mock so no running Signal API
+container is required.
 """
 
 from __future__ import annotations
 
-import subprocess
-from unittest.mock import MagicMock, call, patch
-
+import requests
 import pytest
 
 from notifier_signal import SignalNotifier
@@ -42,17 +41,17 @@ class TestSignalNotifierInit:
         notifier = SignalNotifier(sender="+10000000001", recipient="+10000000002")
         assert notifier.recipient == "+10000000002"
 
-    def test_default_signal_cli_path(self):
+    def test_default_api_url(self):
         notifier = SignalNotifier(sender="+10000000001", recipient="+10000000002")
-        assert notifier.signal_cli == "signal-cli"
+        assert notifier.api_url == "http://localhost:8080"
 
-    def test_custom_signal_cli_path(self):
+    def test_custom_api_url(self):
         notifier = SignalNotifier(
             sender="+10000000001",
             recipient="+10000000002",
-            signal_cli="/usr/local/bin/signal-cli",
+            api_url="http://192.168.1.10:8080",
         )
-        assert notifier.signal_cli == "/usr/local/bin/signal-cli"
+        assert notifier.api_url == "http://192.168.1.10:8080"
 
 
 # ---------------------------------------------------------------------------
@@ -115,143 +114,120 @@ class TestFormatMessage:
 
 
 # ---------------------------------------------------------------------------
-# Tests: send – successful subprocess call
+# Tests: send – successful HTTP call
 # ---------------------------------------------------------------------------
 
 class TestSendSuccess:
-    def test_subprocess_run_called_on_send(self):
-        """A successful send invokes subprocess.run exactly once."""
+    def test_post_called_on_send(self, requests_mock):
+        """A successful send makes exactly one POST to /v2/send."""
+        requests_mock.get("http://localhost:8080/v1/about", status_code=200)
+        requests_mock.post("http://localhost:8080/v2/send", status_code=201)
+
         notifier = SignalNotifier(sender="+10000000001", recipient="+10000000002")
+        notifier.send(_sample_triage())
 
-        with patch("notifier_signal.subprocess.run") as mock_run:
-            mock_run.return_value = MagicMock(returncode=0)
-            notifier.send(_sample_triage())
+        assert requests_mock.call_count == 2  # 1 GET reachability + 1 POST send
 
-        mock_run.assert_called_once()
+    def test_payload_recipients_is_list(self, requests_mock):
+        """The JSON payload must contain recipients as a list."""
+        requests_mock.get("http://localhost:8080/v1/about", status_code=200)
+        requests_mock.post("http://localhost:8080/v2/send", status_code=201)
 
-    def test_subprocess_run_uses_check_true(self):
-        """subprocess.run is called with check=True so errors raise exceptions."""
         notifier = SignalNotifier(sender="+10000000001", recipient="+10000000002")
+        notifier.send(_sample_triage())
 
-        with patch("notifier_signal.subprocess.run") as mock_run:
-            mock_run.return_value = MagicMock(returncode=0)
-            notifier.send(_sample_triage())
+        sent_json = requests_mock.last_request.json()
+        assert isinstance(sent_json["recipients"], list)
+        assert "+10000000002" in sent_json["recipients"]
 
-        _, kwargs = mock_run.call_args
-        assert kwargs.get("check") is True
+    def test_payload_number_equals_sender(self, requests_mock):
+        """The JSON payload number field must equal the sender."""
+        requests_mock.get("http://localhost:8080/v1/about", status_code=200)
+        requests_mock.post("http://localhost:8080/v2/send", status_code=201)
 
-    def test_command_includes_sender(self):
-        """The signal-cli command includes the sender account with -u flag."""
         notifier = SignalNotifier(sender="+10000000001", recipient="+10000000002")
+        notifier.send(_sample_triage())
 
-        with patch("notifier_signal.subprocess.run") as mock_run:
-            mock_run.return_value = MagicMock(returncode=0)
-            notifier.send(_sample_triage())
+        sent_json = requests_mock.last_request.json()
+        assert sent_json["number"] == "+10000000001"
 
-        cmd = mock_run.call_args[0][0]
-        assert "-u" in cmd
-        assert "+10000000001" in cmd
+    def test_payload_message_contains_triage_content(self, requests_mock):
+        """The message in the payload contains content from the triage dict."""
+        requests_mock.get("http://localhost:8080/v1/about", status_code=200)
+        requests_mock.post("http://localhost:8080/v2/send", status_code=201)
 
-    def test_command_includes_recipient(self):
-        """The signal-cli command includes the recipient phone number."""
         notifier = SignalNotifier(sender="+10000000001", recipient="+10000000002")
+        notifier.send(_sample_triage())
 
-        with patch("notifier_signal.subprocess.run") as mock_run:
-            mock_run.return_value = MagicMock(returncode=0)
-            notifier.send(_sample_triage())
+        sent_json = requests_mock.last_request.json()
+        assert "Interview invite" in sent_json["message"]
+        assert "school trip" in sent_json["message"]
+        assert "Weekly newsletter" in sent_json["message"]
 
-        cmd = mock_run.call_args[0][0]
-        assert "+10000000002" in cmd
+    def test_custom_api_url_used(self, requests_mock):
+        """A custom api_url is used for both the reachability check and POST."""
+        requests_mock.get("http://192.168.1.10:8080/v1/about", status_code=200)
+        requests_mock.post("http://192.168.1.10:8080/v2/send", status_code=201)
 
-    def test_command_includes_send_subcommand(self):
-        """The signal-cli command includes the 'send' subcommand."""
-        notifier = SignalNotifier(sender="+10000000001", recipient="+10000000002")
-
-        with patch("notifier_signal.subprocess.run") as mock_run:
-            mock_run.return_value = MagicMock(returncode=0)
-            notifier.send(_sample_triage())
-
-        cmd = mock_run.call_args[0][0]
-        assert "send" in cmd
-
-    def test_command_includes_message_flag(self):
-        """The signal-cli command passes the formatted message with -m flag."""
-        notifier = SignalNotifier(sender="+10000000001", recipient="+10000000002")
-
-        with patch("notifier_signal.subprocess.run") as mock_run:
-            mock_run.return_value = MagicMock(returncode=0)
-            notifier.send(_sample_triage())
-
-        cmd = mock_run.call_args[0][0]
-        assert "-m" in cmd
-
-    def test_command_message_contains_triage_content(self):
-        """The message passed to signal-cli contains content from the triage dict."""
-        notifier = SignalNotifier(sender="+10000000001", recipient="+10000000002")
-
-        with patch("notifier_signal.subprocess.run") as mock_run:
-            mock_run.return_value = MagicMock(returncode=0)
-            notifier.send(_sample_triage())
-
-        cmd = mock_run.call_args[0][0]
-        message_index = cmd.index("-m") + 1
-        message = cmd[message_index]
-        assert "Interview invite" in message
-        assert "school trip" in message
-        assert "Weekly newsletter" in message
-
-    def test_custom_signal_cli_path_used_in_command(self):
-        """A custom signal-cli path is used as the first element of the command."""
         notifier = SignalNotifier(
             sender="+10000000001",
             recipient="+10000000002",
-            signal_cli="/opt/signal-cli/bin/signal-cli",
+            api_url="http://192.168.1.10:8080",
         )
+        notifier.send(_sample_triage())
 
-        with patch("notifier_signal.subprocess.run") as mock_run:
-            mock_run.return_value = MagicMock(returncode=0)
-            notifier.send(_sample_triage())
-
-        cmd = mock_run.call_args[0][0]
-        assert cmd[0] == "/opt/signal-cli/bin/signal-cli"
+        assert requests_mock.call_count == 2
 
 
 # ---------------------------------------------------------------------------
 # Tests: send – error handling
 # ---------------------------------------------------------------------------
 
-class TestSendErrorHandling:
-    def test_called_process_error_propagates(self):
-        """If signal-cli exits non-zero, CalledProcessError is raised."""
+class TestSendFailure:
+    def test_500_response_raises_http_error(self, requests_mock):
+        """A 500 response from /v2/send raises requests.HTTPError."""
+        requests_mock.get("http://localhost:8080/v1/about", status_code=200)
+        requests_mock.post("http://localhost:8080/v2/send", status_code=500)
+
         notifier = SignalNotifier(sender="+10000000001", recipient="+10000000002")
+        with pytest.raises(requests.HTTPError):
+            notifier.send(_sample_triage())
 
-        with patch("notifier_signal.subprocess.run") as mock_run:
-            mock_run.side_effect = subprocess.CalledProcessError(
-                returncode=1, cmd="signal-cli"
-            )
-            with pytest.raises(subprocess.CalledProcessError):
-                notifier.send(_sample_triage())
+    def test_404_response_raises_http_error(self, requests_mock):
+        """A 404 response from /v2/send raises requests.HTTPError."""
+        requests_mock.get("http://localhost:8080/v1/about", status_code=200)
+        requests_mock.post("http://localhost:8080/v2/send", status_code=404)
 
-    def test_file_not_found_propagates(self):
-        """If signal-cli is not installed, FileNotFoundError is raised."""
         notifier = SignalNotifier(sender="+10000000001", recipient="+10000000002")
+        with pytest.raises(requests.HTTPError):
+            notifier.send(_sample_triage())
 
-        with patch("notifier_signal.subprocess.run") as mock_run:
-            mock_run.side_effect = FileNotFoundError("signal-cli not found")
-            with pytest.raises(FileNotFoundError):
-                notifier.send(_sample_triage())
+    def test_container_unreachable_raises_connection_error(self, requests_mock):
+        """If the Docker container is unreachable, ConnectionError is raised."""
+        requests_mock.get(
+            "http://localhost:8080/v1/about",
+            exc=requests.exceptions.ConnectionError,
+        )
 
-    def test_service_down_raises_called_process_error(self):
-        """A non-zero exit code from signal-cli (e.g. service down) raises CalledProcessError."""
         notifier = SignalNotifier(sender="+10000000001", recipient="+10000000002")
+        with pytest.raises(ConnectionError):
+            notifier.send(_sample_triage())
 
-        with patch("notifier_signal.subprocess.run") as mock_run:
-            mock_run.side_effect = subprocess.CalledProcessError(
-                returncode=2,
-                cmd="signal-cli",
-                stderr="Error: Failed to connect to Signal service",
-            )
-            with pytest.raises(subprocess.CalledProcessError) as exc_info:
-                notifier.send(_sample_triage())
+    def test_container_timeout_raises_connection_error(self, requests_mock):
+        """If the reachability check times out, ConnectionError is raised."""
+        requests_mock.get(
+            "http://localhost:8080/v1/about",
+            exc=requests.exceptions.Timeout,
+        )
 
-        assert exc_info.value.returncode == 2
+        notifier = SignalNotifier(sender="+10000000001", recipient="+10000000002")
+        with pytest.raises(ConnectionError):
+            notifier.send(_sample_triage())
+
+    def test_unhealthy_container_raises_connection_error(self, requests_mock):
+        """A non-2xx response from /v1/about is treated as an unreachable container."""
+        requests_mock.get("http://localhost:8080/v1/about", status_code=503)
+
+        notifier = SignalNotifier(sender="+10000000001", recipient="+10000000002")
+        with pytest.raises(ConnectionError):
+            notifier.send(_sample_triage())
