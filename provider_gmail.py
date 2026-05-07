@@ -123,8 +123,9 @@ class GmailProvider:
     def _extract_body(payload: dict) -> str:
         """Decode the plain-text body from a message payload.
 
-        Handles both simple (``text/plain``) and multipart messages.
-        For multipart messages the first ``text/plain`` part is used.
+        Handles simple (``text/plain``), single-level multipart, and deeply
+        nested multipart messages (e.g. multipart/mixed > multipart/alternative
+        > text/plain) by recursing into sub-parts.
         """
         mime_type = payload.get("mimeType", "")
 
@@ -132,11 +133,11 @@ class GmailProvider:
             data = payload.get("body", {}).get("data", "")
             return _decode_base64(data) if data else ""
 
-        # Multipart: recurse into parts looking for text/plain
+        # Multipart: recurse into each part, return the first text/plain found.
         for part in payload.get("parts", []):
-            if part.get("mimeType") == "text/plain":
-                data = part.get("body", {}).get("data", "")
-                return _decode_base64(data) if data else ""
+            result = GmailProvider._extract_body(part)
+            if result:
+                return result
 
         return ""
 

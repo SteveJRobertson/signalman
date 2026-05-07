@@ -12,7 +12,7 @@ Gmail API → provider_gmail.py → processor_ai.py (Ollama) → notifier_signal
 
 1. **Gmail Fetcher** (`provider_gmail.py`) – authenticates with OAuth 2.0 and retrieves unread emails from the last 24 hours.
 2. **AI Processor** (`processor_ai.py`) – sends the emails to a local Ollama LLM and returns a structured triage: `urgent`, `tasks`, and `digest`.
-3. **Signal Notifier** (`notifier_signal.py`) – formats the triage result and delivers it via `signal-cli`.
+3. **Signal Notifier** (`notifier_signal.py`) – formats the triage result and delivers it via the Signal REST API.
 4. **Orchestrator** (`main.py`) – wires the three modules together, reads configuration from `.env`, and handles errors gracefully.
 
 ---
@@ -21,12 +21,11 @@ Gmail API → provider_gmail.py → processor_ai.py (Ollama) → notifier_signal
 
 ### Prerequisites
 
-| Dependency | Install |
-|---|---|
-| Python 3.12+ | `brew install python` |
-| Ollama | [ollama.com/download](https://ollama.com/download) |
-| signal-cli | `brew install signal-cli` |
-| A Signal account registered on this device | See [signal-cli docs](https://github.com/AsamK/signal-cli) |
+| Dependency   | Install                                                       |
+| ------------ | ------------------------------------------------------------- |
+| Python 3.12+ | `brew install python`                                         |
+| Ollama       | [ollama.com/download](https://ollama.com/download)            |
+| Docker       | [docker.com/get-started](https://www.docker.com/get-started/) |
 
 ---
 
@@ -72,14 +71,19 @@ On first run, a browser window will open for the OAuth consent flow. The resulti
 
 ---
 
-### 6. Register signal-cli
+### 6. Start the Signal API container
 
-Register your phone number with Signal (if not already done):
+Run the Signal REST API Docker container, mounting your existing signal-cli data directory:
 
 ```bash
-signal-cli -u +447700900000 register
-signal-cli -u +447700900000 verify <code-from-sms>
+docker run -d --name signal-api \
+  -p 8080:8080 \
+  -v ~/.local/share/signal-cli:/home/.local/share/signal-cli \
+  -e "MODE=json-rpc" \
+  bbernhard/signal-cli-rest-api
 ```
+
+The container exposes the API on `http://localhost:8080`. Ensure it is running before each scheduled run.
 
 ---
 
@@ -89,13 +93,13 @@ Copy the example below and fill in your values. The `.env` file is **gitignored*
 
 ```dotenv
 # Required
-SIGNAL_SENDER=+447700900000       # The Signal number registered on this machine (replace with your number)
-SIGNAL_RECIPIENT=+447700900001    # Your personal phone number (the number that will receive briefings)
+SIGNAL_SENDER_NUMBER=+447700900000     # The Signal number registered in the Docker container
+SIGNAL_RECIPIENT_NUMBER=+447700900001  # Your personal phone number (the number that will receive briefings)
 
 # Optional – override defaults only if needed
 GMAIL_TOKEN_PATH=token.json
 GMAIL_CREDENTIALS_PATH=credentials.json
-SIGNAL_CLI_PATH=signal-cli                         # Full path if not on PATH
+SIGNAL_API_URL=http://localhost:8080                   # Base URL of the Signal REST API container
 OLLAMA_URL=http://localhost:11434/api/generate
 OLLAMA_MODEL=llama3
 ```
@@ -195,12 +199,12 @@ signalman/
 
 ## Environment variables reference
 
-| Variable | Required | Default | Description |
-|---|---|---|---|
-| `SIGNAL_SENDER` | ✅ | – | Signal phone number registered on this device |
-| `SIGNAL_RECIPIENT` | ✅ | – | Phone number that receives the briefing |
-| `GMAIL_TOKEN_PATH` | ❌ | `token.json` | Path to the OAuth2 token file |
-| `GMAIL_CREDENTIALS_PATH` | ❌ | `credentials.json` | Path to the OAuth2 credentials file |
-| `SIGNAL_CLI_PATH` | ❌ | `signal-cli` | Full path to the `signal-cli` executable |
-| `OLLAMA_URL` | ❌ | `http://localhost:11434/api/generate` | Ollama API endpoint |
-| `OLLAMA_MODEL` | ❌ | `llama3` | LLM model to use for triage |
+| Variable                  | Required | Default                               | Description                                            |
+| ------------------------- | -------- | ------------------------------------- | ------------------------------------------------------ |
+| `SIGNAL_SENDER_NUMBER`    | ✅       | –                                     | Signal phone number registered in the Docker container |
+| `SIGNAL_RECIPIENT_NUMBER` | ✅       | –                                     | Phone number that receives the briefing                |
+| `GMAIL_TOKEN_PATH`        | ❌       | `token.json`                          | Path to the OAuth2 token file                          |
+| `GMAIL_CREDENTIALS_PATH`  | ❌       | `credentials.json`                    | Path to the OAuth2 credentials file                    |
+| `SIGNAL_API_URL`          | ❌       | `http://localhost:8080`               | Base URL of the Signal REST API container              |
+| `OLLAMA_URL`              | ❌       | `http://localhost:11434/api/generate` | Ollama API endpoint                                    |
+| `OLLAMA_MODEL`            | ❌       | `llama3`                              | LLM model to use for triage                            |

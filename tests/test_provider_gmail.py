@@ -3,6 +3,8 @@
 All Gmail API calls are mocked so no real credentials are required.
 """
 
+from __future__ import annotations
+
 import base64
 from unittest.mock import MagicMock
 
@@ -51,6 +53,38 @@ def _make_multipart_message(msg_id: str, subject: str, sender: str, body: str) -
                 {
                     "mimeType": "text/html",
                     "body": {"data": base64.urlsafe_b64encode(b"<b>ignored</b>").decode()},
+                },
+            ],
+        },
+    }
+
+
+def _make_nested_multipart_message(msg_id: str, subject: str, sender: str, body: str) -> dict:
+    """Build a multipart/mixed > multipart/alternative > text/plain message."""
+    raw_body = base64.urlsafe_b64encode(body.encode()).decode()
+    return {
+        "id": msg_id,
+        "payload": {
+            "headers": [
+                {"name": "Subject", "value": subject},
+                {"name": "From", "value": sender},
+            ],
+            "mimeType": "multipart/mixed",
+            "body": {},
+            "parts": [
+                {
+                    "mimeType": "multipart/alternative",
+                    "body": {},
+                    "parts": [
+                        {
+                            "mimeType": "text/plain",
+                            "body": {"data": raw_body},
+                        },
+                        {
+                            "mimeType": "text/html",
+                            "body": {"data": base64.urlsafe_b64encode(b"<b>ignored</b>").decode()},
+                        },
+                    ],
                 },
             ],
         },
@@ -153,6 +187,20 @@ class TestFetchUnreadEmails:
 
         assert len(result) == 1
         assert result[0]["body"] == "Plain part text"
+
+    def test_deeply_nested_multipart_extracts_plain_text(self):
+        """multipart/mixed > multipart/alternative > text/plain is handled recursively."""
+        msg = _make_nested_multipart_message("msg1", "Nested", "x@example.com", "Nested plain text")
+        mock_service = _build_mock_service(
+            list_response={"messages": [{"id": "msg1"}]},
+            messages=[msg],
+        )
+        provider = GmailProvider.from_service(mock_service)
+
+        result = provider.fetch_unread_emails()
+
+        assert len(result) == 1
+        assert result[0]["body"] == "Nested plain text"
 
     def test_correct_query_sent_to_api(self):
         """The API is called with a query for unread mail from the last 24 hours."""
