@@ -223,3 +223,11 @@ class TestSendFailure:
         notifier = SignalNotifier(sender="+10000000001", recipient="+10000000002")
         with pytest.raises(ConnectionError):
             notifier.send(_sample_triage())
+
+    def test_unhealthy_container_raises_connection_error(self, requests_mock):
+        """A non-2xx response from /v1/about is treated as an unreachable container."""
+        requests_mock.get("http://localhost:8080/v1/about", status_code=503)
+
+        notifier = SignalNotifier(sender="+10000000001", recipient="+10000000002")
+        with pytest.raises(ConnectionError):
+            notifier.send(_sample_triage())

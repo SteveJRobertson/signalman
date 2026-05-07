@@ -192,10 +192,10 @@ class TestMissingEnvVars:
 class TestMainBlockErrorHandling:
     def test_key_error_causes_sys_exit_1(self, monkeypatch):
         """A missing env var causes SystemExit(1) via the real __main__ handler."""
-        import main
         import runpy
 
-        monkeypatch.setattr(main, "run", MagicMock(side_effect=KeyError("SIGNAL_SENDER_NUMBER")))
+        monkeypatch.delenv("SIGNAL_SENDER_NUMBER", raising=False)
+        monkeypatch.delenv("SIGNAL_RECIPIENT_NUMBER", raising=False)
 
         with pytest.raises(SystemExit) as exc_info:
             runpy.run_module("main", run_name="__main__", alter_sys=True)
@@ -204,10 +204,16 @@ class TestMainBlockErrorHandling:
 
     def test_generic_exception_causes_sys_exit_1(self, monkeypatch):
         """Any unexpected exception causes SystemExit(1) via the real __main__ handler."""
-        import main
         import runpy
+        import provider_gmail
 
-        monkeypatch.setattr(main, "run", MagicMock(side_effect=RuntimeError("boom")))
+        monkeypatch.setenv("SIGNAL_SENDER_NUMBER", "+10000000001")
+        monkeypatch.setenv("SIGNAL_RECIPIENT_NUMBER", "+10000000002")
+        monkeypatch.setattr(
+            provider_gmail.GmailProvider,
+            "from_credentials",
+            MagicMock(side_effect=RuntimeError("boom")),
+        )
 
         with pytest.raises(SystemExit) as exc_info:
             runpy.run_module("main", run_name="__main__", alter_sys=True)
