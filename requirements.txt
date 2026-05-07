@@ -1,4 +1,10 @@
+# Runtime dependencies
 google-api-python-client
-pytest
+google-auth-oauthlib
+google-auth-httplib2
 python-dotenv
 requests
+
+# Dev / test dependencies
+pytest
+requests-mock

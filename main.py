@@ -10,14 +10,14 @@ Usage::
 
 Required environment variables (set in ``.env`` or the shell):
 
-- ``SIGNAL_SENDER``      – The Signal phone number registered on this device.
-- ``SIGNAL_RECIPIENT``   – The phone number that receives the briefing.
+- ``SIGNAL_SENDER_NUMBER``    – The Signal phone number registered on the Docker container.
+- ``SIGNAL_RECIPIENT_NUMBER`` – The phone number that receives the briefing.
 
 Optional environment variables:
 
 - ``GMAIL_TOKEN_PATH``       – Path to the OAuth2 token file (default: ``token.json``).
 - ``GMAIL_CREDENTIALS_PATH`` – Path to the OAuth2 credentials file (default: ``credentials.json``).
-- ``SIGNAL_CLI_PATH``        – Path to the ``signal-cli`` executable (default: ``signal-cli``).
+- ``SIGNAL_API_URL``         – Signal REST API base URL (default: ``http://localhost:8080``).
 - ``OLLAMA_URL``             – Ollama API endpoint (default: ``http://localhost:11434/api/generate``).
 - ``OLLAMA_MODEL``           – Model name to use for triage (default: ``llama3``).
 """
@@ -45,9 +45,9 @@ logger = logging.getLogger(__name__)
 
 def run() -> None:
     """Fetch emails, triage them, and send the daily briefing via Signal."""
-    signal_sender = os.environ["SIGNAL_SENDER"]
-    signal_recipient = os.environ["SIGNAL_RECIPIENT"]
-    signal_cli = os.getenv("SIGNAL_CLI_PATH", "signal-cli")
+    signal_sender = os.environ["SIGNAL_SENDER_NUMBER"]
+    signal_recipient = os.environ["SIGNAL_RECIPIENT_NUMBER"]
+    signal_api_url = os.getenv("SIGNAL_API_URL", "http://localhost:8080")
 
     ollama_url = os.getenv("OLLAMA_URL", "http://localhost:11434/api/generate")
     ollama_model = os.getenv("OLLAMA_MODEL", "llama3")
@@ -71,7 +71,7 @@ def run() -> None:
     notifier = SignalNotifier(
         sender=signal_sender,
         recipient=signal_recipient,
-        signal_cli=signal_cli,
+        api_url=signal_api_url,
     )
     notifier.send(triage)
     logger.info("Briefing sent successfully.")
