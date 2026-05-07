@@ -66,14 +66,20 @@ class SignalNotifier:
         """Verify the Signal API container is reachable before sending.
 
         Raises:
-            ConnectionError: If the container cannot be reached.
+            ConnectionError: If the container cannot be reached or returns a
+                non-2xx response.
         """
         try:
-            requests.get(f"{self.api_url}/v1/about", timeout=3)
+            response = requests.get(f"{self.api_url}/v1/about", timeout=3)
+            response.raise_for_status()
         except (requests.exceptions.ConnectionError, requests.exceptions.Timeout) as exc:
             raise ConnectionError(
                 f"Signal API container is unreachable at {self.api_url}. "
                 "Make sure the Docker container is running."
+            ) from exc
+        except requests.exceptions.HTTPError as exc:
+            raise ConnectionError(
+                f"Signal API container returned an unexpected status at {self.api_url}: {exc}"
             ) from exc
 
     @staticmethod

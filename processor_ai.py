@@ -19,6 +19,23 @@ import requests
 OLLAMA_URL = "http://localhost:11434/api/generate"
 DEFAULT_MODEL = "llama3"
 
+
+def _normalise_list(value: Any) -> list[str]:
+    """Coerce an LLM-returned field to a flat list of strings.
+
+    Handles the non-deterministic output shapes an LLM may return:
+    - list/tuple  → each element coerced to str
+    - bare string → wrapped in a one-element list (avoids per-char iteration)
+    - None        → empty list
+    - anything else (int, dict, …) → wrapped as a single str
+    """
+    if isinstance(value, (list, tuple)):
+        return [str(i) for i in value]
+    if value is None:
+        return []
+    return [str(value)]
+
+
 _SYSTEM_PROMPT = textwrap.dedent("""\
     You are an email triage assistant. You will be given a list of emails.
     Your job is to classify each email into exactly one of three categories:
@@ -128,7 +145,7 @@ class AIProcessor:
             raise ValueError(f"Failed to parse LLM response as JSON: {exc}\nRaw: {raw}") from exc
 
         return {
-            "urgent": [str(i) for i in data.get("urgent", [])],
-            "tasks": [str(i) for i in data.get("tasks", [])],
-            "digest": [str(i) for i in data.get("digest", [])],
+            "urgent": _normalise_list(data.get("urgent")),
+            "tasks": _normalise_list(data.get("tasks")),
+            "digest": _normalise_list(data.get("digest")),
         }

@@ -261,3 +261,25 @@ class TestErrorHandling:
         result = AIProcessor().triage(_sample_emails())
 
         assert isinstance(result["urgent"][0], str)
+
+    def test_bare_string_field_wrapped_in_list(self, requests_mock):
+        """A bare string for a triage field is wrapped in a one-element list."""
+        requests_mock.post(
+            "http://localhost:11434/api/generate",
+            json={"model": "llama3", "response": '{"urgent": "single item", "tasks": [], "digest": []}', "done": True},
+        )
+
+        result = AIProcessor().triage(_sample_emails())
+
+        assert result["urgent"] == ["single item"]
+
+    def test_none_field_returns_empty_list(self, requests_mock):
+        """A null value for a triage field returns an empty list."""
+        requests_mock.post(
+            "http://localhost:11434/api/generate",
+            json={"model": "llama3", "response": '{"urgent": null, "tasks": [], "digest": []}', "done": True},
+        )
+
+        result = AIProcessor().triage(_sample_emails())
+
+        assert result["urgent"] == []
