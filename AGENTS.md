@@ -2,7 +2,7 @@
 
 ## Project Overview
 
-Signalman is a Python 3.12+ automation that triages Gmail via a local Ollama LLM and delivers a daily briefing via the Signal REST API (Docker container).
+Signalman is a Python 3.11+ automation that triages Gmail via a local Ollama LLM and delivers a daily briefing via the Signal REST API (Docker container).
 
 Architecture:
 
@@ -14,7 +14,7 @@ Gmail API → provider_gmail.py → processor_ai.py (Ollama) → notifier_signal
 
 ## Language & Runtime
 
-- Python 3.12+
+- Python 3.11+
 - All new code must be compatible with the existing modules: `provider_gmail.py`, `processor_ai.py`, `notifier_signal.py`, `main.py`
 
 ---

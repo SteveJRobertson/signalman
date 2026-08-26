@@ -23,7 +23,7 @@ Gmail API → provider_gmail.py → processor_ai.py (Ollama) → notifier_signal
 
 | Dependency   | Install                                                       |
 | ------------ | ------------------------------------------------------------- |
-| Python 3.12+ | `brew install python`                                         |
+| Python 3.11+ | `brew install python`                                         |
 | Ollama       | [ollama.com/download](https://ollama.com/download)            |
 | Docker       | [docker.com/get-started](https://www.docker.com/get-started/) |
 
