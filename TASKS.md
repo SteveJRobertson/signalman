@@ -9,7 +9,7 @@ Test tasks are listed separately from implementation on purpose — they are the
 | --- | --- | --- |
 | 0 · Secure the keys | 4 | ✅ Done |
 | 0a · Reconcile the environment | 4 | ✅ Done |
-| 0b · Settings object | 13 | ⬜ Not started |
+| 0b · Settings object | 13 | ✅ Done |
 | 0c · Preview mode | 6 | ⬜ Not started |
 | 1 · Read the whole inbox | 10 | ⬜ Not started |
 | 2 · Understand every email | 9 | ⬜ Not started |
@@ -43,31 +43,31 @@ Four documents described an environment that didn't exist. Settled before writin
 
 ---
 
-## Phase 0b · Settings object
+## Phase 0b · Settings object ✅
 
 Every phase below adds configuration; doing this last would mean doing it nine times over, then redoing all nine.
 
 ### Implementation
 
-- [ ] **Create `config.py`** — frozen `Settings` dataclass, all fields and defaults from the plan · `M`
-- [ ] **Write `from_env()`** — `os.environ[...]` for the two required fields, `os.getenv` for the rest · `M`
-- [ ] **Coerce numerics safely** — `int()` failure must name the offending variable, not raise a bare `ValueError` · `S`
-- [ ] **Migrate `OLLAMA_URL` to a base URL** — breaking change; Phases 5–6 need `/api/tags` too · `S`
-- [ ] **Guard the old `OLLAMA_URL` form** — a value ending `/api/generate` must fail at startup with a clear message, not a mid-run 404 · `S`
-- [ ] **Single `load_dotenv()`** — remove the duplicate call from `provider_gmail.py` · `S`
-- [ ] **Delete the import-time constants** — `TOKEN_PATH`, `CREDENTIALS_PATH`, `GMAIL_OAUTH_PORT` bind at import and cannot be overridden afterwards · `provider_gmail.py` · `S`
-- [ ] **Thread `Settings` through all four modules** — constructor argument on each · `M`
+- [x] **Create `config.py`** — frozen `Settings` dataclass, all fields and defaults from the plan · `M`
+- [x] **Write `from_env()`** — `os.environ[...]` for the two required fields, `os.getenv` for the rest · `M`
+- [x] **Coerce numerics safely** — `int()` failure must name the offending variable, not raise a bare `ValueError` · `S`
+- [x] **Migrate `OLLAMA_URL` to a base URL** — breaking change; Phases 5–6 need `/api/tags` too · `S`
+- [x] **Guard the old `OLLAMA_URL` form** — a value ending `/api/generate` must fail at startup with a clear message, not a mid-run 404 · `S`
+- [x] **Single `load_dotenv()`** — remove the duplicate call from `provider_gmail.py` · `S`
+- [x] **Delete the import-time constants** — `TOKEN_PATH`, `CREDENTIALS_PATH`, `GMAIL_OAUTH_PORT` bind at import and cannot be overridden afterwards · `provider_gmail.py` · `S`
+- [x] **Thread `Settings` through all four modules** — constructor argument on each · `M`
 
 ### Tests
 
-- [ ] **New `tests/test_config.py`** — required-field `KeyError`, defaults, bad-int message, `/api/generate` guard · `M`
-- [ ] **Replace env patching in `tests/test_main.py`** — construct a `Settings` and pass it; no `patch.dict` · `M`
-- [ ] **Fix the three assertions that cannot fail** — `tests/test_main.py:102`, `:108`, `:114`, each written to pass under either calling convention · `S`
+- [x] **New `tests/test_config.py`** — required-field `KeyError`, defaults, bad-int message, `/api/generate` guard · `M`
+- [x] **Replace env patching in `tests/test_main.py`** — construct a `Settings` and pass it; no `patch.dict` · `M`
+- [x] **Fix the three assertions that cannot fail** — `tests/test_main.py:102`, `:108`, `:114`. Resolved by removing them rather than patching in place: each was checking one constructor kwarg (`sender`, `recipient`, `api_url`) individually, using `kwargs.get(x) or …` fallbacks to tolerate either calling convention — which is exactly why they could pass on wrong data. Now that every constructor takes a single `settings` argument, one `assert_called_once_with(settings)` per constructor replaces all three and is strictly stronger · `S`
 
 ### Docs
 
-- [ ] **Document the `OLLAMA_URL` change** — three env tables plus the dotenv example · `S`
-- [ ] **Note the settings object** in `CLAUDE.md` — it currently documents the two-paradigm behaviour this task removes · `S`
+- [x] **Document the `OLLAMA_URL` change** — three env tables plus the dotenv example · `S`
+- [x] **Note the settings object** in `CLAUDE.md` — replaced the two-paradigm/duplicated-defaults gotchas with a description of `config.py`; also corrected two things found stale while editing: `CLAUDE.md`'s own leftover `3.12+` claim (missed in Phase 0a, which only swept the other four docs), and its "byte-identical" claim about `AGENTS.md`/`.github/copilot-instructions.md` (they differ in the H1 only) · `S`
 
 ---
 
