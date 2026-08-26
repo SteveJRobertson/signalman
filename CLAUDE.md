@@ -17,9 +17,12 @@ python3 -m pytest tests/test_processor.py::TestTriageCombined::test_empty_email_
 python3 -m pytest -k empty         # by keyword
 
 python3 main.py                    # real run: needs Ollama, the Signal container, and .env
+python3 main.py --dry-run --verbose --limit 5   # preview mode: prints the briefing, logs the AI prompt/reply, caps the inbox — no Signal call
 ```
 
 There is no linter or formatter configured, and no `pyproject.toml`/`setup.py`/`conftest.py`. Modules are flat top-level imports, so **pytest must be run from the repo root** — `tests/test_main.py` does `import main` and `runpy.run_module("main")`.
+
+**Any test that runs `main.py`'s `__main__` block via `runpy` must patch `sys.argv` first** (`monkeypatch.setattr(sys, "argv", ["main.py"])`), now that it parses real CLI flags — otherwise `argparse` reads pytest's own argv and the test fails with `SystemExit(2)` instead of whatever it meant to check. See `tests/test_main.py`'s `TestMainBlockErrorHandling` and `TestMainBlockCLIWiring` for the pattern, including why those tests patch the shared `provider_gmail`/`processor_ai`/`notifier_signal` module attributes rather than `main.X` — `runpy` re-executes `main`'s top-level imports fresh, so a patch on `main`'s own namespace doesn't take effect.
 
 Two live dependencies for a real run: Ollama (`ollama pull llama3`) and the Signal container:
 
@@ -47,7 +50,7 @@ Things that are easy to get wrong:
 - **All settings live in one place: `config.py`'s `Settings` dataclass**, built once via `Settings.from_env()` in `main.py`'s `__main__` block and passed as a single argument into `GmailProvider.from_credentials()`, `AIProcessor()`, and `SignalNotifier()`. There is no per-module env reading and no duplicated defaults — if you're tempted to add a new `os.getenv(...)` call inside one of those modules, add a field to `Settings` instead.
 - **`OLLAMA_URL` is a base URL** (e.g. `http://localhost:11434`), not a full endpoint — `AIProcessor` appends `/api/generate` itself. `Settings.from_env()` raises `ValueError` at startup if the value still ends in `/api/generate`, since that was the pre-Phase-0b form and silently 404s otherwise.
 - **LLM output is untrusted in shape, not just content.** `processor_ai._normalise_list()` coerces whatever the model returns (bare string, `None`, int, tuple) into `list[str]`. Keep new LLM-derived fields going through it. Prompt injection from email bodies is a documented, accepted risk for this local personal tool — the mitigation is that everything is stringified.
-- **`SignalNotifier.send()` probes `GET /v1/about` first** and raises `ConnectionError` if the container is down, before `POST /v2/send`. Both calls must be mocked in tests.
+- **`SignalNotifier.send()` probes `GET /v1/about` first** and raises `ConnectionError` if the container is down, before `POST /v2/send`. Both calls must be mocked in tests. Exception: when `settings.dry_run` is `True`, `send()` returns immediately after printing the formatted message to stdout — it makes no HTTP call at all, not even the reachability probe.
 - **Gmail OAuth is headless.** `flow.run_local_server(open_browser=False)` on a fixed port (`GMAIL_OAUTH_PORT`, default 8085) so the flow works over SSH; the redirect URI must match in the Google Cloud console.
 - `GmailProvider._extract_body()` recurses through nested multipart payloads and returns the first `text/plain` part it finds.
 
