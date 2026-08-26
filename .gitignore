@@ -216,3 +216,14 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# ---------------------------------------------------------------------------
+# Signalman
+# ---------------------------------------------------------------------------
+
+# Secrets — never commit. token.json is a long-lived key to the Gmail account.
+credentials.json
+token.json
+
+# macOS
+.DS_Store

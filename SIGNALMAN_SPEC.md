@@ -1,5 +1,7 @@
 # Spec: "Signalman" (MVP)
 
+> **Superseded by [docs/SPEC.md](docs/SPEC.md).** This is the original MVP definition, kept as a historical record of what the project set out to build. Most of it was delivered; requirement 4.2 ("Clean: Strip HTML and signatures") was not. See `docs/SPEC.md` for the current roadmap and `docs/PLAN.md` for the technical detail.
+
 ## 1. Project Goal
 
 A modular Python automation running on a Mac Mini that triages Gmail via a local LLM (Ollama) and delivers a structured daily briefing via Signal.

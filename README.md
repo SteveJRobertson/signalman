@@ -67,7 +67,11 @@ Make sure Ollama is running before each scheduled run (it starts automatically o
 4. Create **OAuth 2.0 credentials** (Desktop application type).
 5. Download the credentials JSON file and save it to the project root as `credentials.json`.
 
-On first run, a browser window will open for the OAuth consent flow. The resulting token is saved automatically as `token.json` and refreshed on subsequent runs.
+On first run the consent flow starts a local listener on `GMAIL_OAUTH_PORT` (default `8085`) and **prints a URL to the terminal** rather than opening a browser itself — so the flow also works over SSH. Open the printed URL in any browser, approve access, and the resulting token is saved automatically as `token.json`, then refreshed on subsequent runs.
+
+Add `http://127.0.0.1:8085/` to the **Authorised redirect URIs** of your OAuth client in the Google Cloud console. If you change `GMAIL_OAUTH_PORT`, change the redirect URI to match.
+
+> `credentials.json` and `token.json` are gitignored. `token.json` is a long-lived key to your Gmail account — never commit it, and revoke it at [myaccount.google.com/permissions](https://myaccount.google.com/permissions) if it is ever exposed.
 
 ---
 
@@ -99,6 +103,7 @@ SIGNAL_RECIPIENT_NUMBER=+447700900001  # Your personal phone number (the number 
 # Optional – override defaults only if needed
 GMAIL_TOKEN_PATH=token.json
 GMAIL_CREDENTIALS_PATH=credentials.json
+GMAIL_OAUTH_PORT=8085                                  # Local port for the one-off OAuth consent flow
 SIGNAL_API_URL=http://localhost:8080                   # Base URL of the Signal REST API container
 OLLAMA_URL=http://localhost:11434/api/generate
 OLLAMA_MODEL=llama3
@@ -205,6 +210,7 @@ signalman/
 | `SIGNAL_RECIPIENT_NUMBER` | ✅       | –                                     | Phone number that receives the briefing                |
 | `GMAIL_TOKEN_PATH`        | ❌       | `token.json`                          | Path to the OAuth2 token file                          |
 | `GMAIL_CREDENTIALS_PATH`  | ❌       | `credentials.json`                    | Path to the OAuth2 credentials file                    |
+| `GMAIL_OAUTH_PORT`        | ❌       | `8085`                                | Local port used by the one-off OAuth consent flow      |
 | `SIGNAL_API_URL`          | ❌       | `http://localhost:8080`               | Base URL of the Signal REST API container              |
 | `OLLAMA_URL`              | ❌       | `http://localhost:11434/api/generate` | Ollama API endpoint                                    |
 | `OLLAMA_MODEL`            | ❌       | `llama3`                              | LLM model to use for triage                            |
