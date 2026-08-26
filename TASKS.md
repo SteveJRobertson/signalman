@@ -8,7 +8,7 @@ Test tasks are listed separately from implementation on purpose — they are the
 | Phase | Tasks | Status |
 | --- | --- | --- |
 | 0 · Secure the keys | 4 | ✅ Done |
-| 0a · Reconcile the environment | 4 | ⬜ Not started |
+| 0a · Reconcile the environment | 4 | ✅ Done |
 | 0b · Settings object | 13 | ⬜ Not started |
 | 0c · Preview mode | 6 | ⬜ Not started |
 | 1 · Read the whole inbox | 10 | ⬜ Not started |
@@ -32,14 +32,14 @@ Test tasks are listed separately from implementation on purpose — they are the
 
 ---
 
-## Phase 0a · Reconcile the environment
+## Phase 0a · Reconcile the environment ✅
 
-Four documents describe an environment that does not exist. Settle this before writing code against it.
+Four documents described an environment that didn't exist. Settled before writing code against it.
 
-- [ ] **Decide the Python version** — only 3.11.4 is installed; the suite has always run on it; nothing in the code needs 3.12 · `S`
-- [ ] **Correct the version claim** — `3.12+` → `3.11+` in four places · `README.md`, `AGENTS.md`, `.github/copilot-instructions.md`, `SIGNALMAN_SPEC.md` · `S`
-- [ ] **Create `.venv` and install deps** — the README instructs it and the plist hard-codes it, but it does not exist · `S`
-- [ ] **Verify the scheduled job actually runs** — `launchctl start com.signalman.daily`, then check the log. As documented it would fail on a fresh machine · `S`
+- [x] **Decide the Python version** — only 3.11.4 is installed; the suite has always run on it; nothing in the code needs 3.12 · `S`
+- [x] **Correct the version claim** — `3.12+` → `3.11+` in four places · `README.md`, `AGENTS.md`, `.github/copilot-instructions.md`, `SIGNALMAN_SPEC.md` · `S`
+- [x] **Create `.venv` and install deps** — the README instructs it and the plist hard-codes it; created and verified (72 tests pass inside it) · `S`
+- [x] **Verify the scheduled job actually runs** — loaded a personalised copy of the plist into `~/Library/LaunchAgents`, triggered it with `launchctl start`, confirmed via the log that it invoked the `.venv` interpreter in the correct working directory and failed cleanly on a missing env var (expected — no credentials are configured yet). Unloaded and removed afterwards; nothing left registered on the system · `S`
 
 ---
 
