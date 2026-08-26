@@ -8,25 +8,17 @@ from __future__ import annotations
 
 import requests
 
+from config import Settings
+
 
 class SignalNotifier:
-    """Sends a formatted triage briefing to a Signal recipient.
+    """Sends a formatted triage briefing to a Signal recipient."""
 
-    Args:
-        sender:    The Signal account (phone number) used to send the message.
-        recipient: The phone number that will receive the message.
-        api_url:   Base URL of the Signal REST API (default: ``http://localhost:8080``).
-    """
-
-    def __init__(
-        self,
-        sender: str,
-        recipient: str,
-        api_url: str = "http://localhost:8080",
-    ) -> None:
-        self.sender = sender
-        self.recipient = recipient
-        self.api_url = api_url
+    def __init__(self, settings: Settings) -> None:
+        self.settings = settings
+        self.sender = settings.signal_sender
+        self.recipient = settings.signal_recipient
+        self.api_url = settings.signal_api_url
 
     # ------------------------------------------------------------------
     # Public API

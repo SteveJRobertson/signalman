@@ -16,8 +16,7 @@ from typing import Any
 
 import requests
 
-OLLAMA_URL = "http://localhost:11434/api/generate"
-DEFAULT_MODEL = "llama3"
+from config import Settings
 
 
 def _normalise_list(value: Any) -> list[str]:
@@ -64,13 +63,10 @@ _SYSTEM_PROMPT = textwrap.dedent("""\
 class AIProcessor:
     """Triages a list of emails using a local Ollama LLM."""
 
-    def __init__(
-        self,
-        url: str = OLLAMA_URL,
-        model: str = DEFAULT_MODEL,
-    ) -> None:
-        self.url = url
-        self.model = model
+    def __init__(self, settings: Settings) -> None:
+        self.settings = settings
+        self.model = settings.ollama_model
+        self.generate_url = f"{settings.ollama_url}/api/generate"
 
     # ------------------------------------------------------------------
     # Public API
@@ -128,7 +124,7 @@ class AIProcessor:
             "prompt": prompt,
             "stream": False,
         }
-        response = requests.post(self.url, json=payload, timeout=120)
+        response = requests.post(self.generate_url, json=payload, timeout=120)
         response.raise_for_status()
         return response.json()["response"]
 
