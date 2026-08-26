@@ -9,12 +9,23 @@ from __future__ import annotations
 import requests
 import pytest
 
+from config import Settings
 from notifier_signal import SignalNotifier
 
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
+def _settings(**overrides) -> Settings:
+    """Build a Settings instance with sane test defaults."""
+    base = {
+        "signal_sender": "+10000000001",
+        "signal_recipient": "+10000000002",
+    }
+    base.update(overrides)
+    return Settings(**base)
+
 
 def _sample_triage() -> dict:
     return {
@@ -34,23 +45,19 @@ def _empty_triage() -> dict:
 
 class TestSignalNotifierInit:
     def test_stores_sender(self):
-        notifier = SignalNotifier(sender="+10000000001", recipient="+10000000002")
+        notifier = SignalNotifier(_settings())
         assert notifier.sender == "+10000000001"
 
     def test_stores_recipient(self):
-        notifier = SignalNotifier(sender="+10000000001", recipient="+10000000002")
+        notifier = SignalNotifier(_settings())
         assert notifier.recipient == "+10000000002"
 
     def test_default_api_url(self):
-        notifier = SignalNotifier(sender="+10000000001", recipient="+10000000002")
+        notifier = SignalNotifier(_settings())
         assert notifier.api_url == "http://localhost:8080"
 
     def test_custom_api_url(self):
-        notifier = SignalNotifier(
-            sender="+10000000001",
-            recipient="+10000000002",
-            api_url="http://192.168.1.10:8080",
-        )
+        notifier = SignalNotifier(_settings(signal_api_url="http://192.168.1.10:8080"))
         assert notifier.api_url == "http://192.168.1.10:8080"
 
 
@@ -123,7 +130,7 @@ class TestSendSuccess:
         requests_mock.get("http://localhost:8080/v1/about", status_code=200)
         requests_mock.post("http://localhost:8080/v2/send", status_code=201)
 
-        notifier = SignalNotifier(sender="+10000000001", recipient="+10000000002")
+        notifier = SignalNotifier(_settings())
         notifier.send(_sample_triage())
 
         assert requests_mock.call_count == 2  # 1 GET reachability + 1 POST send
@@ -133,7 +140,7 @@ class TestSendSuccess:
         requests_mock.get("http://localhost:8080/v1/about", status_code=200)
         requests_mock.post("http://localhost:8080/v2/send", status_code=201)
 
-        notifier = SignalNotifier(sender="+10000000001", recipient="+10000000002")
+        notifier = SignalNotifier(_settings())
         notifier.send(_sample_triage())
 
         sent_json = requests_mock.last_request.json()
@@ -145,7 +152,7 @@ class TestSendSuccess:
         requests_mock.get("http://localhost:8080/v1/about", status_code=200)
         requests_mock.post("http://localhost:8080/v2/send", status_code=201)
 
-        notifier = SignalNotifier(sender="+10000000001", recipient="+10000000002")
+        notifier = SignalNotifier(_settings())
         notifier.send(_sample_triage())
 
         sent_json = requests_mock.last_request.json()
@@ -156,7 +163,7 @@ class TestSendSuccess:
         requests_mock.get("http://localhost:8080/v1/about", status_code=200)
         requests_mock.post("http://localhost:8080/v2/send", status_code=201)
 
-        notifier = SignalNotifier(sender="+10000000001", recipient="+10000000002")
+        notifier = SignalNotifier(_settings())
         notifier.send(_sample_triage())
 
         sent_json = requests_mock.last_request.json()
@@ -169,11 +176,7 @@ class TestSendSuccess:
         requests_mock.get("http://192.168.1.10:8080/v1/about", status_code=200)
         requests_mock.post("http://192.168.1.10:8080/v2/send", status_code=201)
 
-        notifier = SignalNotifier(
-            sender="+10000000001",
-            recipient="+10000000002",
-            api_url="http://192.168.1.10:8080",
-        )
+        notifier = SignalNotifier(_settings(signal_api_url="http://192.168.1.10:8080"))
         notifier.send(_sample_triage())
 
         assert requests_mock.call_count == 2
@@ -189,7 +192,7 @@ class TestSendFailure:
         requests_mock.get("http://localhost:8080/v1/about", status_code=200)
         requests_mock.post("http://localhost:8080/v2/send", status_code=500)
 
-        notifier = SignalNotifier(sender="+10000000001", recipient="+10000000002")
+        notifier = SignalNotifier(_settings())
         with pytest.raises(requests.HTTPError):
             notifier.send(_sample_triage())
 
@@ -198,7 +201,7 @@ class TestSendFailure:
         requests_mock.get("http://localhost:8080/v1/about", status_code=200)
         requests_mock.post("http://localhost:8080/v2/send", status_code=404)
 
-        notifier = SignalNotifier(sender="+10000000001", recipient="+10000000002")
+        notifier = SignalNotifier(_settings())
         with pytest.raises(requests.HTTPError):
             notifier.send(_sample_triage())
 
@@ -209,7 +212,7 @@ class TestSendFailure:
             exc=requests.exceptions.ConnectionError,
         )
 
-        notifier = SignalNotifier(sender="+10000000001", recipient="+10000000002")
+        notifier = SignalNotifier(_settings())
         with pytest.raises(ConnectionError):
             notifier.send(_sample_triage())
 
@@ -220,7 +223,7 @@ class TestSendFailure:
             exc=requests.exceptions.Timeout,
         )
 
-        notifier = SignalNotifier(sender="+10000000001", recipient="+10000000002")
+        notifier = SignalNotifier(_settings())
         with pytest.raises(ConnectionError):
             notifier.send(_sample_triage())
 
@@ -228,6 +231,6 @@ class TestSendFailure:
         """A non-2xx response from /v1/about is treated as an unreachable container."""
         requests_mock.get("http://localhost:8080/v1/about", status_code=503)
 
-        notifier = SignalNotifier(sender="+10000000001", recipient="+10000000002")
+        notifier = SignalNotifier(_settings())
         with pytest.raises(ConnectionError):
             notifier.send(_sample_triage())

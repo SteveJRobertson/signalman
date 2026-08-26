@@ -11,12 +11,23 @@ import json
 import pytest
 import requests
 
+from config import Settings
 from processor_ai import AIProcessor
 
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
+def _settings(**overrides) -> Settings:
+    """Build a Settings instance with sane test defaults."""
+    base = {
+        "signal_sender": "+10000000001",
+        "signal_recipient": "+10000000002",
+    }
+    base.update(overrides)
+    return Settings(**base)
+
 
 def _register_ollama_response(requests_mock, payload: dict, url: str = "http://localhost:11434/api/generate") -> None:
     """Register a successful Ollama API response with requests_mock."""
@@ -54,20 +65,20 @@ def _sample_emails() -> list[dict]:
 # ---------------------------------------------------------------------------
 
 class TestAIProcessorInit:
-    def test_default_url(self):
-        processor = AIProcessor()
-        assert processor.url == "http://localhost:11434/api/generate"
+    def test_default_generate_url(self):
+        processor = AIProcessor(_settings())
+        assert processor.generate_url == "http://localhost:11434/api/generate"
 
-    def test_custom_url(self):
-        processor = AIProcessor(url="http://custom:11434/api/generate")
-        assert processor.url == "http://custom:11434/api/generate"
+    def test_custom_generate_url(self):
+        processor = AIProcessor(_settings(ollama_url="http://custom:11434"))
+        assert processor.generate_url == "http://custom:11434/api/generate"
 
     def test_default_model(self):
-        processor = AIProcessor()
+        processor = AIProcessor(_settings())
         assert processor.model == "llama3"
 
     def test_custom_model(self):
-        processor = AIProcessor(model="mistral")
+        processor = AIProcessor(_settings(ollama_model="mistral"))
         assert processor.model == "mistral"
 
 
@@ -85,7 +96,7 @@ class TestTriageUrgent:
         }
         _register_ollama_response(requests_mock, ai_payload)
 
-        result = AIProcessor().triage(_sample_emails())
+        result = AIProcessor(_settings()).triage(_sample_emails())
 
         assert "urgent" in result
         assert len(result["urgent"]) == 1
@@ -95,7 +106,7 @@ class TestTriageUrgent:
         """Processing emails results in exactly one Ollama API call."""
         _register_ollama_response(requests_mock, {"urgent": ["Critical issue"], "tasks": [], "digest": []})
 
-        AIProcessor().triage(_sample_emails())
+        AIProcessor(_settings()).triage(_sample_emails())
 
         assert requests_mock.call_count == 1
 
@@ -114,7 +125,7 @@ class TestTriageTask:
         }
         _register_ollama_response(requests_mock, ai_payload)
 
-        result = AIProcessor().triage(_sample_emails())
+        result = AIProcessor(_settings()).triage(_sample_emails())
 
         assert "tasks" in result
         assert len(result["tasks"]) == 1
@@ -129,7 +140,7 @@ class TestTriageTask:
         }
         _register_ollama_response(requests_mock, ai_payload)
 
-        result = AIProcessor().triage(_sample_emails())
+        result = AIProcessor(_settings()).triage(_sample_emails())
 
         assert len(result["tasks"]) == 3
 
@@ -148,7 +159,7 @@ class TestTriageDigest:
         }
         _register_ollama_response(requests_mock, ai_payload)
 
-        result = AIProcessor().triage(_sample_emails())
+        result = AIProcessor(_settings()).triage(_sample_emails())
 
         assert "digest" in result
         assert len(result["digest"]) == 1
@@ -158,7 +169,7 @@ class TestTriageDigest:
         """Junk/irrelevant emails produce empty lists rather than noisy output."""
         _register_ollama_response(requests_mock, {"urgent": [], "tasks": [], "digest": []})
 
-        result = AIProcessor().triage(_sample_emails())
+        result = AIProcessor(_settings()).triage(_sample_emails())
 
         assert result["urgent"] == []
         assert result["tasks"] == []
@@ -179,7 +190,7 @@ class TestTriageCombined:
         }
         _register_ollama_response(requests_mock, ai_payload)
 
-        result = AIProcessor().triage(_sample_emails())
+        result = AIProcessor(_settings()).triage(_sample_emails())
 
         assert len(result["urgent"]) == 1
         assert len(result["tasks"]) == 1
@@ -187,7 +198,7 @@ class TestTriageCombined:
 
     def test_empty_email_list_returns_empty_categories(self):
         """An empty inbox short-circuits before any API call and returns empty lists."""
-        result = AIProcessor().triage([])
+        result = AIProcessor(_settings()).triage([])
 
         assert result == {"urgent": [], "tasks": [], "digest": []}
 
@@ -201,7 +212,7 @@ class TestApiRequestPayload:
         """The configured model name is included in the request payload."""
         _register_ollama_response(requests_mock, {"urgent": [], "tasks": [], "digest": []})
 
-        AIProcessor(model="llama3").triage(_sample_emails())
+        AIProcessor(_settings(ollama_model="llama3")).triage(_sample_emails())
 
         body = requests_mock.last_request.json()
         assert body["model"] == "llama3"
@@ -210,7 +221,7 @@ class TestApiRequestPayload:
         """The Ollama generate endpoint is the target of the POST request."""
         _register_ollama_response(requests_mock, {"urgent": [], "tasks": [], "digest": []})
 
-        AIProcessor().triage(_sample_emails())
+        AIProcessor(_settings()).triage(_sample_emails())
 
         assert requests_mock.last_request.url == "http://localhost:11434/api/generate"
 
@@ -218,7 +229,7 @@ class TestApiRequestPayload:
         """The prompt sent to the model includes content from the emails."""
         _register_ollama_response(requests_mock, {"urgent": [], "tasks": [], "digest": []})
 
-        AIProcessor().triage(_sample_emails())
+        AIProcessor(_settings()).triage(_sample_emails())
 
         body = requests_mock.last_request.json()
         prompt = body["prompt"]
@@ -239,7 +250,7 @@ class TestErrorHandling:
         )
 
         with pytest.raises(ValueError, match="Failed to parse"):
-            AIProcessor().triage(_sample_emails())
+            AIProcessor(_settings()).triage(_sample_emails())
 
     def test_http_error_propagates(self, requests_mock):
         """An HTTP error from the Ollama API propagates to the caller."""
@@ -249,7 +260,7 @@ class TestErrorHandling:
         )
 
         with pytest.raises(requests.HTTPError):
-            AIProcessor().triage(_sample_emails())
+            AIProcessor(_settings()).triage(_sample_emails())
 
     def test_non_string_list_items_coerced_to_str(self, requests_mock):
         """Non-string items in triage lists (e.g. dicts) are coerced to strings."""
@@ -258,7 +269,7 @@ class TestErrorHandling:
             json={"model": "llama3", "response": '{"urgent": [{"key": "val"}], "tasks": [], "digest": []}', "done": True},
         )
 
-        result = AIProcessor().triage(_sample_emails())
+        result = AIProcessor(_settings()).triage(_sample_emails())
 
         assert isinstance(result["urgent"][0], str)
 
@@ -269,7 +280,7 @@ class TestErrorHandling:
             json={"model": "llama3", "response": '{"urgent": "single item", "tasks": [], "digest": []}', "done": True},
         )
 
-        result = AIProcessor().triage(_sample_emails())
+        result = AIProcessor(_settings()).triage(_sample_emails())
 
         assert result["urgent"] == ["single item"]
 
@@ -280,6 +291,6 @@ class TestErrorHandling:
             json={"model": "llama3", "response": '{"urgent": null, "tasks": [], "digest": []}', "done": True},
         )
 
-        result = AIProcessor().triage(_sample_emails())
+        result = AIProcessor(_settings()).triage(_sample_emails())
 
         assert result["urgent"] == []

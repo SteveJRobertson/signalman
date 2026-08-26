@@ -7,21 +7,16 @@ via the Gmail API.
 from __future__ import annotations
 
 import base64
-import os
 from typing import Any
 
-from dotenv import load_dotenv
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
 from google.auth.transport.requests import Request
 from googleapiclient.discovery import build
 
-load_dotenv()
+from config import Settings
 
 SCOPES = ["https://www.googleapis.com/auth/gmail.readonly"]
-TOKEN_PATH = os.getenv("GMAIL_TOKEN_PATH", "token.json")
-CREDENTIALS_PATH = os.getenv("GMAIL_CREDENTIALS_PATH", "credentials.json")
-GMAIL_OAUTH_PORT = int(os.getenv("GMAIL_OAUTH_PORT", "8085"))
 
 
 class GmailProvider:
@@ -39,29 +34,32 @@ class GmailProvider:
         return cls(service)
 
     @classmethod
-    def from_credentials(cls) -> "GmailProvider":
+    def from_credentials(cls, settings: Settings) -> "GmailProvider":
         """Authenticate with OAuth2 and return a ready-to-use GmailProvider.
 
-        Looks for ``token.json`` (refreshed automatically) and falls back to
-        ``credentials.json`` for the initial interactive OAuth flow.
+        Looks for ``settings.gmail_token_path`` (refreshed automatically) and
+        falls back to ``settings.gmail_credentials_path`` for the initial
+        interactive OAuth flow.
         """
+        token_path = settings.gmail_token_path
         creds: Credentials | None = None
 
-        if os.path.exists(TOKEN_PATH):
-            creds = Credentials.from_authorized_user_file(TOKEN_PATH, SCOPES)
+        if token_path.exists():
+            creds = Credentials.from_authorized_user_file(str(token_path), SCOPES)
 
         if not creds or not creds.valid:
             if creds and creds.expired and creds.refresh_token:
                 creds.refresh(Request())
             else:
-                flow = InstalledAppFlow.from_client_secrets_file(CREDENTIALS_PATH, SCOPES)
+                flow = InstalledAppFlow.from_client_secrets_file(
+                    str(settings.gmail_credentials_path), SCOPES
+                )
                 creds = flow.run_local_server(
                     host="127.0.0.1",
-                    port=GMAIL_OAUTH_PORT,
+                    port=settings.gmail_oauth_port,
                     open_browser=False,
                 )
-            with open(TOKEN_PATH, "w") as token_file:
-                token_file.write(creds.to_json())
+            token_path.write_text(creds.to_json())
 
         service = build("gmail", "v1", credentials=creds)
         return cls(service)

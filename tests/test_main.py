@@ -6,15 +6,26 @@ are mocked so the test suite requires no real credentials or running services.
 
 from __future__ import annotations
 
-import sys
-from unittest.mock import MagicMock, call, patch
+from unittest.mock import MagicMock, patch
 
 import pytest
+
+from config import Settings
 
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
+def _settings(**overrides) -> Settings:
+    """Build a Settings instance with sane test defaults."""
+    base = {
+        "signal_sender": "+10000000001",
+        "signal_recipient": "+10000000002",
+    }
+    base.update(overrides)
+    return Settings(**base)
+
 
 def _sample_emails() -> list[dict]:
     return [
@@ -40,20 +51,16 @@ def _sample_triage() -> dict:
 # ---------------------------------------------------------------------------
 
 class TestRunSuccess:
-    """run() wires GmailProvider → AIProcessor → SignalNotifier correctly."""
+    """run(settings) wires GmailProvider → AIProcessor → SignalNotifier correctly."""
 
-    def _run_with_mocks(self, emails=None, triage=None, env=None):
-        """Execute main.run() with all external dependencies mocked."""
+    def _run_with_mocks(self, emails=None, triage=None, settings=None):
+        """Execute main.run(settings) with all external dependencies mocked."""
         if emails is None:
             emails = _sample_emails()
         if triage is None:
             triage = _sample_triage()
-        base_env: dict[str, str] = {
-            "SIGNAL_SENDER_NUMBER": "+10000000001",
-            "SIGNAL_RECIPIENT_NUMBER": "+10000000002",
-        }
-        if env:
-            base_env.update(env)
+        if settings is None:
+            settings = _settings()
 
         mock_provider = MagicMock()
         mock_provider.fetch_unread_emails.return_value = emails
@@ -67,127 +74,67 @@ class TestRunSuccess:
             patch("main.GmailProvider") as mock_gmail_cls,
             patch("main.AIProcessor") as mock_ai_cls,
             patch("main.SignalNotifier") as mock_signal_cls,
-            patch.dict("os.environ", base_env, clear=False),
         ):
             mock_gmail_cls.from_credentials.return_value = mock_provider
             mock_ai_cls.return_value = mock_processor
             mock_signal_cls.return_value = mock_notifier
 
             import main
-            main.run()
+            main.run(settings)
 
-        return mock_gmail_cls, mock_ai_cls, mock_signal_cls, mock_provider, mock_processor, mock_notifier
+        return {
+            "gmail_cls": mock_gmail_cls,
+            "ai_cls": mock_ai_cls,
+            "signal_cls": mock_signal_cls,
+            "provider": mock_provider,
+            "processor": mock_processor,
+            "notifier": mock_notifier,
+            "settings": settings,
+        }
 
-    def test_gmail_provider_from_credentials_called(self):
-        mock_gmail_cls, *_ = self._run_with_mocks()
-        mock_gmail_cls.from_credentials.assert_called_once()
+    def test_gmail_provider_from_credentials_called_with_settings(self):
+        mocks = self._run_with_mocks()
+        mocks["gmail_cls"].from_credentials.assert_called_once_with(mocks["settings"])
 
     def test_fetch_unread_emails_called(self):
-        *_, mock_provider, _, _ = self._run_with_mocks()
-        mock_provider.fetch_unread_emails.assert_called_once()
+        mocks = self._run_with_mocks()
+        mocks["provider"].fetch_unread_emails.assert_called_once()
+
+    def test_ai_processor_constructed_with_settings(self):
+        mocks = self._run_with_mocks()
+        mocks["ai_cls"].assert_called_once_with(mocks["settings"])
 
     def test_ai_processor_receives_emails(self):
         emails = _sample_emails()
-        *_, mock_provider, mock_processor, _ = self._run_with_mocks(emails=emails)
-        mock_processor.triage.assert_called_once_with(emails)
+        mocks = self._run_with_mocks(emails=emails)
+        mocks["processor"].triage.assert_called_once_with(emails)
+
+    def test_signal_notifier_constructed_with_settings(self):
+        mocks = self._run_with_mocks()
+        mocks["signal_cls"].assert_called_once_with(mocks["settings"])
 
     def test_signal_notifier_receives_triage(self):
         triage = _sample_triage()
-        *_, mock_notifier = self._run_with_mocks(triage=triage)
-        mock_notifier.send.assert_called_once_with(triage)
-
-    def test_signal_notifier_constructed_with_sender(self):
-        _, _, mock_signal_cls, *_ = self._run_with_mocks()
-        _, kwargs = mock_signal_cls.call_args
-        assert kwargs.get("sender") == "+10000000001" or mock_signal_cls.call_args[0][0] == "+10000000001"
-
-    def test_signal_notifier_constructed_with_recipient(self):
-        _, _, mock_signal_cls, *_ = self._run_with_mocks()
-        call_kwargs = mock_signal_cls.call_args
-        args, kwargs = call_kwargs
-        recipient = kwargs.get("recipient") or (args[1] if len(args) > 1 else None)
-        assert recipient == "+10000000002"
-
-    def test_default_signal_api_url(self):
-        _, _, mock_signal_cls, *_ = self._run_with_mocks()
-        args, kwargs = mock_signal_cls.call_args
-        assert kwargs.get("api_url", "http://localhost:8080") == "http://localhost:8080"
-
-    def test_custom_signal_api_url_from_env(self):
-        _, _, mock_signal_cls, *_ = self._run_with_mocks(
-            env={"SIGNAL_API_URL": "http://192.168.1.10:8080"}
-        )
-        args, kwargs = mock_signal_cls.call_args
-        assert kwargs.get("api_url") == "http://192.168.1.10:8080"
-
-    def test_default_ollama_url(self):
-        _, mock_ai_cls, *_ = self._run_with_mocks()
-        args, kwargs = mock_ai_cls.call_args
-        assert kwargs.get("url") == "http://localhost:11434/api/generate"
-
-    def test_custom_ollama_url_from_env(self):
-        _, mock_ai_cls, *_ = self._run_with_mocks(
-            env={"OLLAMA_URL": "http://192.168.1.10:11434/api/generate"}
-        )
-        args, kwargs = mock_ai_cls.call_args
-        assert kwargs.get("url") == "http://192.168.1.10:11434/api/generate"
-
-    def test_default_ollama_model(self):
-        _, mock_ai_cls, *_ = self._run_with_mocks()
-        args, kwargs = mock_ai_cls.call_args
-        assert kwargs.get("model") == "llama3"
-
-    def test_custom_ollama_model_from_env(self):
-        _, mock_ai_cls, *_ = self._run_with_mocks(env={"OLLAMA_MODEL": "mistral"})
-        args, kwargs = mock_ai_cls.call_args
-        assert kwargs.get("model") == "mistral"
+        mocks = self._run_with_mocks(triage=triage)
+        mocks["notifier"].send.assert_called_once_with(triage)
 
     def test_empty_inbox_completes_without_error(self):
         """An empty inbox should still send an 'all clear' briefing."""
         triage = {"urgent": [], "tasks": [], "digest": []}
-        *_, mock_notifier = self._run_with_mocks(emails=[], triage=triage)
-        mock_notifier.send.assert_called_once_with(triage)
-
-
-# ---------------------------------------------------------------------------
-# Tests: missing environment variables
-# ---------------------------------------------------------------------------
-
-class TestMissingEnvVars:
-    def test_missing_signal_sender_exits(self):
-        """run() must exit with code 1 when SIGNAL_SENDER_NUMBER is not set."""
-        env_without_sender = {"SIGNAL_RECIPIENT_NUMBER": "+10000000002"}
-
-        with (
-            patch("main.GmailProvider"),
-            patch("main.AIProcessor"),
-            patch("main.SignalNotifier"),
-            patch.dict("os.environ", env_without_sender, clear=True),
-        ):
-            import main
-            with pytest.raises(KeyError):
-                main.run()
-
-    def test_missing_signal_recipient_exits(self):
-        """run() must exit with code 1 when SIGNAL_RECIPIENT_NUMBER is not set."""
-        env_without_recipient = {
-            "SIGNAL_SENDER_NUMBER": "+10000000001",
-        }
-
-        with (
-            patch("main.GmailProvider"),
-            patch("main.AIProcessor"),
-            patch("main.SignalNotifier"),
-            patch.dict("os.environ", env_without_recipient, clear=True),
-        ):
-            import main
-            with pytest.raises(KeyError):
-                main.run()
+        mocks = self._run_with_mocks(emails=[], triage=triage)
+        mocks["notifier"].send.assert_called_once_with(triage)
 
 
 # ---------------------------------------------------------------------------
 # Tests: __main__ block error handling
 # ---------------------------------------------------------------------------
+#
+# Environment-driven failures (missing required vars, bad numeric/URL values)
+# are exercised against config.Settings.from_env() directly in
+# tests/test_config.py. These tests instead confirm the real __main__
+# entrypoint in main.py turns those failures — and any other unexpected
+# exception — into a clean SystemExit(1), by running the actual module via
+# runpy rather than mocking main.run().
 
 class TestMainBlockErrorHandling:
     def test_key_error_causes_sys_exit_1(self, monkeypatch):

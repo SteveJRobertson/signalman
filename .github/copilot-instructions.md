@@ -56,7 +56,7 @@ Gmail API → provider_gmail.py → processor_ai.py (Ollama) → notifier_signal
 | `GMAIL_TOKEN_PATH`        | ❌       | `token.json`                          |
 | `GMAIL_CREDENTIALS_PATH`  | ❌       | `credentials.json`                    |
 | `GMAIL_OAUTH_PORT`        | ❌       | `8085`                                |
-| `OLLAMA_URL`              | ❌       | `http://localhost:11434/api/generate` |
+| `OLLAMA_URL`              | ❌       | `http://localhost:11434`              |
 | `OLLAMA_MODEL`            | ❌       | `llama3`                              |
 
 ---
