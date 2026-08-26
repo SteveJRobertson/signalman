@@ -6,6 +6,7 @@ are mocked so the test suite requires no real credentials or running services.
 
 from __future__ import annotations
 
+import sys
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -53,7 +54,7 @@ def _sample_triage() -> dict:
 class TestRunSuccess:
     """run(settings) wires GmailProvider → AIProcessor → SignalNotifier correctly."""
 
-    def _run_with_mocks(self, emails=None, triage=None, settings=None):
+    def _run_with_mocks(self, emails=None, triage=None, settings=None, limit=None):
         """Execute main.run(settings) with all external dependencies mocked."""
         if emails is None:
             emails = _sample_emails()
@@ -80,7 +81,7 @@ class TestRunSuccess:
             mock_signal_cls.return_value = mock_notifier
 
             import main
-            main.run(settings)
+            main.run(settings, limit=limit)
 
         return {
             "gmail_cls": mock_gmail_cls,
@@ -124,6 +125,109 @@ class TestRunSuccess:
         mocks = self._run_with_mocks(emails=[], triage=triage)
         mocks["notifier"].send.assert_called_once_with(triage)
 
+    def test_limit_truncates_emails_before_triage(self):
+        """--limit caps the emails passed to the processor, not just fetched."""
+        emails = [
+            {"id": "msg1", "subject": "One", "sender": "a@example.com", "body": ""},
+            {"id": "msg2", "subject": "Two", "sender": "b@example.com", "body": ""},
+            {"id": "msg3", "subject": "Three", "sender": "c@example.com", "body": ""},
+        ]
+        mocks = self._run_with_mocks(emails=emails, limit=1)
+        mocks["processor"].triage.assert_called_once_with([emails[0]])
+
+    def test_no_limit_processes_all_emails(self):
+        """Without --limit, every fetched email reaches the processor."""
+        emails = _sample_emails()
+        mocks = self._run_with_mocks(emails=emails, limit=None)
+        mocks["processor"].triage.assert_called_once_with(emails)
+
+    def test_limit_larger_than_inbox_is_a_no_op(self):
+        """A limit greater than the number of emails changes nothing."""
+        emails = _sample_emails()
+        mocks = self._run_with_mocks(emails=emails, limit=100)
+        mocks["processor"].triage.assert_called_once_with(emails)
+
+
+# ---------------------------------------------------------------------------
+# Tests: CLI argument parsing
+# ---------------------------------------------------------------------------
+
+class TestArgParser:
+    """build_arg_parser() defines the preview-mode flags."""
+
+    def _parse(self, argv):
+        import main
+        return main.build_arg_parser().parse_args(argv)
+
+    def test_defaults(self):
+        args = self._parse([])
+        assert args.dry_run is False
+        assert args.limit is None
+        assert args.verbose is False
+
+    def test_dry_run_flag(self):
+        assert self._parse(["--dry-run"]).dry_run is True
+
+    def test_limit_flag_parses_as_int(self):
+        args = self._parse(["--limit", "5"])
+        assert args.limit == 5
+        assert isinstance(args.limit, int)
+
+    def test_verbose_flag(self):
+        assert self._parse(["--verbose"]).verbose is True
+
+    def test_flags_combine(self):
+        args = self._parse(["--dry-run", "--limit", "3", "--verbose"])
+        assert args.dry_run is True
+        assert args.limit == 3
+        assert args.verbose is True
+
+
+# ---------------------------------------------------------------------------
+# Tests: __main__ block CLI wiring
+# ---------------------------------------------------------------------------
+#
+# TestArgParser proves the flags parse correctly; TestRunSuccess proves
+# run(settings, limit=...) does the right thing with them. This test covers
+# the one seam neither of those reaches: the two lines in __main__ itself
+# that turn --dry-run into a Settings.dry_run=True actually passed to
+# SignalNotifier. Runs the real module via runpy, in the same style as
+# TestMainBlockErrorHandling below — patching the shared provider_gmail /
+# processor_ai / notifier_signal module attributes (not "main.X") is
+# required here, because runpy re-executes main's top-level imports fresh
+# and would not see a patch applied to main's own namespace.
+
+class TestMainBlockCLIWiring:
+    def test_dry_run_flag_produces_dry_run_settings(self, monkeypatch):
+        import runpy
+        import provider_gmail
+        import processor_ai
+        import notifier_signal
+
+        monkeypatch.setattr(sys, "argv", ["main.py", "--dry-run"])
+        monkeypatch.setenv("SIGNAL_SENDER_NUMBER", "+10000000001")
+        monkeypatch.setenv("SIGNAL_RECIPIENT_NUMBER", "+10000000002")
+
+        mock_provider = MagicMock()
+        mock_provider.fetch_unread_emails.return_value = []
+        monkeypatch.setattr(
+            provider_gmail.GmailProvider,
+            "from_credentials",
+            MagicMock(return_value=mock_provider),
+        )
+
+        mock_processor = MagicMock()
+        mock_processor.triage.return_value = {"urgent": [], "tasks": [], "digest": []}
+        monkeypatch.setattr(processor_ai, "AIProcessor", MagicMock(return_value=mock_processor))
+
+        mock_notifier_cls = MagicMock()
+        monkeypatch.setattr(notifier_signal, "SignalNotifier", mock_notifier_cls)
+
+        runpy.run_module("main", run_name="__main__", alter_sys=True)
+
+        constructed_settings = mock_notifier_cls.call_args[0][0]
+        assert constructed_settings.dry_run is True
+
 
 # ---------------------------------------------------------------------------
 # Tests: __main__ block error handling
@@ -141,6 +245,7 @@ class TestMainBlockErrorHandling:
         """A missing env var causes SystemExit(1) via the real __main__ handler."""
         import runpy
 
+        monkeypatch.setattr(sys, "argv", ["main.py"])
         monkeypatch.delenv("SIGNAL_SENDER_NUMBER", raising=False)
         monkeypatch.delenv("SIGNAL_RECIPIENT_NUMBER", raising=False)
 
@@ -154,6 +259,7 @@ class TestMainBlockErrorHandling:
         import runpy
         import provider_gmail
 
+        monkeypatch.setattr(sys, "argv", ["main.py"])
         monkeypatch.setenv("SIGNAL_SENDER_NUMBER", "+10000000001")
         monkeypatch.setenv("SIGNAL_RECIPIENT_NUMBER", "+10000000002")
         monkeypatch.setattr(

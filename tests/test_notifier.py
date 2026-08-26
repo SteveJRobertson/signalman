@@ -183,6 +183,38 @@ class TestSendSuccess:
 
 
 # ---------------------------------------------------------------------------
+# Tests: send – dry run (preview mode)
+# ---------------------------------------------------------------------------
+
+class TestSendDryRun:
+    def test_dry_run_issues_no_http_request(self, requests_mock):
+        """Dry-run mode must not touch the network at all — not even the
+        reachability check that normally runs before every send."""
+        notifier = SignalNotifier(_settings(dry_run=True))
+        notifier.send(_sample_triage())
+
+        assert requests_mock.call_count == 0
+
+    def test_dry_run_prints_formatted_briefing(self, requests_mock, capsys):
+        notifier = SignalNotifier(_settings(dry_run=True))
+        notifier.send(_sample_triage())
+
+        printed = capsys.readouterr().out
+        assert "Signalman Daily Briefing" in printed
+        assert "Interview invite" in printed
+
+    def test_non_dry_run_still_sends_normally(self, requests_mock):
+        """dry_run defaults to False — existing send behaviour is unaffected."""
+        requests_mock.get("http://localhost:8080/v1/about", status_code=200)
+        requests_mock.post("http://localhost:8080/v2/send", status_code=201)
+
+        notifier = SignalNotifier(_settings())
+        notifier.send(_sample_triage())
+
+        assert requests_mock.call_count == 2
+
+
+# ---------------------------------------------------------------------------
 # Tests: send – error handling
 # ---------------------------------------------------------------------------
 

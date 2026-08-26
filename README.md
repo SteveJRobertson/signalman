@@ -119,6 +119,16 @@ python3 main.py
 
 You should receive a Signal message within a few seconds. Check the terminal for any errors.
 
+To try it out without messaging your phone every time, use preview mode:
+
+```bash
+python3 main.py --dry-run              # print the briefing to stdout instead of sending it
+python3 main.py --dry-run --limit 5    # only process the first 5 unread emails (fast iteration)
+python3 main.py --dry-run --verbose    # also log the exact AI prompt and raw reply
+```
+
+`--verbose` is the flag to reach for while tuning the classification prompt in `processor_ai.py` — it's the only way to see what the model was actually asked and what it actually said back. `--dry-run` still authenticates with Gmail and calls Ollama for real; only the Signal delivery step is skipped.
+
 ---
 
 ### 9. Schedule with launchd (runs every day at 08:00)
