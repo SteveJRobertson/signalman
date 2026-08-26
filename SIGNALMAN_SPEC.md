@@ -8,7 +8,7 @@ A modular Python automation running on a Mac Mini that triages Gmail via a local
 
 ## 2. Technical Stack
 
-- Language: Python 3.12+
+- Language: Python 3.11+
 - Testing: pytest (Mandatory test-first approach)
 - Email: Google API Client (Gmail)
 - AI: Ollama (Local API)
