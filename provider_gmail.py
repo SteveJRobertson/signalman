@@ -21,6 +21,7 @@ load_dotenv()
 SCOPES = ["https://www.googleapis.com/auth/gmail.readonly"]
 TOKEN_PATH = os.getenv("GMAIL_TOKEN_PATH", "token.json")
 CREDENTIALS_PATH = os.getenv("GMAIL_CREDENTIALS_PATH", "credentials.json")
+GMAIL_OAUTH_PORT = int(os.getenv("GMAIL_OAUTH_PORT", "8085"))
 
 
 class GmailProvider:
@@ -54,7 +55,11 @@ class GmailProvider:
                 creds.refresh(Request())
             else:
                 flow = InstalledAppFlow.from_client_secrets_file(CREDENTIALS_PATH, SCOPES)
-                creds = flow.run_local_server(host="127.0.0.1", port=0)
+                creds = flow.run_local_server(
+                    host="127.0.0.1",
+                    port=GMAIL_OAUTH_PORT,
+                    open_browser=False,
+                )
             with open(TOKEN_PATH, "w") as token_file:
                 token_file.write(creds.to_json())
 
