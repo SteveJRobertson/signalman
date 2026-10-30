@@ -1,19 +1,23 @@
 """AI processor for Signalman.
 
-Sends email snippets to a local Ollama LLM for triage and returns a
-structured JSON summary with three categories:
+Classifies each email with a local Ollama LLM — one call per email — and
+returns a :class:`TriageResult` mapping every verdict back to the email that
+produced it. Each email lands in exactly one category:
 
-- ``urgent``: Items requiring a reply today.
-- ``tasks``:  Action items identified in the email text.
-- ``digest``: Brief summaries of lower-priority information.
+- ``urgent``: needs a reply or action today.
+- ``tasks``:  contains an action item, but not time-critical today.
+- ``digest``: low-priority information worth a skim.
+- ``ignore``: junk or automated noise; filtered out before the briefing.
 """
 
 from __future__ import annotations
 
 import json
 import logging
+import re
 import textwrap
-from typing import Any
+from dataclasses import dataclass
+from typing import Any, Literal, cast, get_args
 
 import requests
 
@@ -21,26 +25,44 @@ from config import Settings
 
 logger = logging.getLogger(__name__)
 
+Category = Literal["urgent", "tasks", "digest", "ignore"]
+CATEGORIES: tuple[str, ...] = get_args(Category)
 
-def _normalise_list(value: Any) -> list[str]:
-    """Coerce an LLM-returned field to a flat list of strings.
+_MAX_SUBJECT_CHARS = 200
+_MAX_SENDER_CHARS = 100
 
-    Handles the non-deterministic output shapes an LLM may return:
-    - list/tuple  → each element coerced to str
-    - bare string → wrapped in a one-element list (avoids per-char iteration)
-    - None        → empty list
-    - anything else (int, dict, …) → wrapped as a single str
-    """
-    if isinstance(value, (list, tuple)):
-        return [str(i) for i in value]
-    if value is None:
-        return []
-    return [str(value)]
+
+class ClassificationError(Exception):
+    """The model's verdict for one email could not be turned into a result."""
+
+
+@dataclass(frozen=True, slots=True)
+class TriagedItem:
+    """The verdict for a single email."""
+
+    email_id: str
+    sender: str
+    subject: str
+    category: Category
+    summary: str
+
+
+@dataclass(frozen=True, slots=True)
+class TriageResult:
+    """Everything the notifier needs: verdicts, failures, and a skip count."""
+
+    items: tuple[TriagedItem, ...] = ()
+    failed_ids: tuple[str, ...] = ()  # classification failed
+    skipped_count: int = 0  # already reported on a previous day (Phase 7)
+
+    def by_category(self, category: Category) -> list[TriagedItem]:
+        """Return the items in *category*, in the order they were triaged."""
+        return [item for item in self.items if item.category == category]
 
 
 _SYSTEM_PROMPT = textwrap.dedent("""\
-    You are an email triage assistant. You will be given a list of emails.
-    Your job is to classify each email into exactly one of three categories:
+    You are an email triage assistant. You will be given one email.
+    Classify it into exactly one of four categories:
 
     - urgent: Emails that require an immediate response today. This includes anything related to
               job applications (interview invites, offer deadlines, recruiter follow-ups),
@@ -51,20 +73,19 @@ _SYSTEM_PROMPT = textwrap.dedent("""\
               (e.g. follow-ups, requests with a future deadline, things to schedule).
     - digest: Low-priority emails such as newsletters, FYIs, marketing, or general
               information that need no immediate action.
+    - ignore: Junk, spam, or automated notifications that require no action and are
+              not worth a mention.
 
-    Ignore junk, spam, or automated notifications that require no action.
+    Also write a concise one-line summary of the email (what it is and what, if anything,
+    is needed).
 
     Respond with ONLY valid JSON in the following format, with no additional text:
-    {
-      "urgent": ["<concise description>", ...],
-      "tasks":  ["<concise description>", ...],
-      "digest": ["<concise description>", ...]
-    }
+    {"category": "urgent" | "tasks" | "digest" | "ignore", "summary": "<concise one-line summary>"}
 """)
 
 
 class AIProcessor:
-    """Triages a list of emails using a local Ollama LLM."""
+    """Triages emails using a local Ollama LLM, one call per email."""
 
     def __init__(self, settings: Settings) -> None:
         self.settings = settings
@@ -75,50 +96,80 @@ class AIProcessor:
     # Public API
     # ------------------------------------------------------------------
 
-    def triage(self, emails: list[dict]) -> dict[str, list[str]]:
-        """Send *emails* to the LLM and return a triage dict.
+    def triage(self, emails: list[dict]) -> TriageResult:
+        """Classify each of *emails* and return the combined result.
+
+        Emails are processed sequentially. An email whose verdict cannot be
+        parsed is recorded in ``TriageResult.failed_ids`` and the run
+        continues; transport failures (Ollama down, HTTP errors) are not
+        swallowed — they abort the run.
 
         Args:
-            emails: A list of email dicts with keys ``id``, ``subject``,
-                    ``sender``, and ``body`` (as returned by
-                    :class:`~provider_gmail.GmailProvider`).
-
-        Returns:
-            A dict with keys ``urgent``, ``tasks``, and ``digest``, each
-            mapping to a list of concise string descriptions.
+            emails: Email dicts with keys ``id``, ``subject``, ``sender`` and
+                ``body`` (as returned by :class:`~provider_gmail.GmailProvider`).
 
         Raises:
-            requests.HTTPError: If the Ollama API returns a non-2xx status.
-            ValueError: If the model response cannot be parsed as JSON.
+            requests.RequestException: If the Ollama API is unreachable or
+                returns a non-2xx status.
         """
-        if not emails:
-            return {"urgent": [], "tasks": [], "digest": []}
+        items: list[TriagedItem] = []
+        failed: list[str] = []
 
-        prompt = self._build_prompt(emails)
-        raw_response = self._call_ollama(prompt)
-        return self._parse_response(raw_response)
+        for position, email in enumerate(emails, start=1):
+            logger.info("Classifying %d/%d…", position, len(emails))
+            try:
+                items.append(self._classify_one(email))
+            except ClassificationError as exc:
+                logger.warning("Could not classify email %r: %s", email.get("id", ""), exc)
+                failed.append(email.get("id", ""))
+
+        return TriageResult(items=tuple(items), failed_ids=tuple(failed))
 
     # ------------------------------------------------------------------
     # Private helpers
     # ------------------------------------------------------------------
 
-    def _build_prompt(self, emails: list[dict]) -> str:
-        """Construct the full prompt from the system instructions and emails.
+    def _classify_one(self, email: dict) -> TriagedItem:
+        """Ask the model for a verdict on a single email.
 
-        Security note: email content (subject, sender, body) is interpolated
-        directly into the prompt and is not sanitised. A malicious email could
-        attempt prompt injection. This is a known, accepted risk for a local
-        personal-use tool. The impact is limited to the triage output because
-        _parse_response() coerces all values to strings.
+        Raises:
+            ClassificationError: If the reply is not a usable verdict.
         """
-        lines = [_SYSTEM_PROMPT, "Here are the emails to triage:\n"]
-        for i, email in enumerate(emails, start=1):
-            lines.append(f"--- Email {i} ---")
-            lines.append(f"From: {email.get('sender', '')}")
-            lines.append(f"Subject: {email.get('subject', '')}")
-            lines.append(f"Body: {email.get('body', '')}")
-            lines.append("")
-        return "\n".join(lines)
+        raw = self._call_ollama(self._build_prompt(email))
+        category, summary = self._parse_response(raw, fallback_summary=email.get("subject", ""))
+        return TriagedItem(
+            email_id=email.get("id", ""),
+            sender=email.get("sender", ""),
+            subject=email.get("subject", ""),
+            category=category,
+            summary=summary,
+        )
+
+    @staticmethod
+    def _build_prompt(email: dict) -> str:
+        """Construct the prompt for one email.
+
+        Subject and sender are bounded here; the body is bounded upstream by
+        :func:`cleaner.clean`.
+
+        Security note: email content is interpolated directly into the prompt
+        and is not sanitised. A malicious email could attempt prompt
+        injection. This is a known, accepted risk for a local personal-use
+        tool. The impact is limited to this email's verdict because
+        _parse_response() validates the category against a fixed set and
+        coerces the summary to a single line of text.
+        """
+        sender = str(email.get("sender", ""))[:_MAX_SENDER_CHARS]
+        subject = str(email.get("subject", ""))[:_MAX_SUBJECT_CHARS]
+        return "\n".join(
+            [
+                _SYSTEM_PROMPT,
+                "Here is the email to triage:\n",
+                f"From: {sender}",
+                f"Subject: {subject}",
+                f"Body: {email.get('body', '')}",
+            ]
+        )
 
     def _call_ollama(self, prompt: str) -> str:
         """POST the prompt to the Ollama API and return the raw response text."""
@@ -126,28 +177,42 @@ class AIProcessor:
             "model": self.model,
             "prompt": prompt,
             "stream": False,
+            # Ollama defaults to a small context window and silently discards
+            # whatever does not fit, so the size must be set explicitly.
+            "options": {"num_ctx": self.settings.ollama_num_ctx},
         }
         logger.debug("Ollama prompt:\n%s", prompt)
-        response = requests.post(self.generate_url, json=payload, timeout=120)
+        response = requests.post(
+            self.generate_url, json=payload, timeout=self.settings.ollama_timeout
+        )
         response.raise_for_status()
         raw = response.json()["response"]
         logger.debug("Ollama raw reply:\n%s", raw)
         return raw
 
     @staticmethod
-    def _parse_response(raw: str) -> dict[str, list[str]]:
-        """Parse the LLM's JSON response into the triage dict.
+    def _parse_response(raw: str, *, fallback_summary: str = "") -> tuple[Category, str]:
+        """Validate the model's reply and return ``(category, summary)``.
+
+        LLM output is untrusted in shape, not just content: the category must
+        be one of :data:`CATEGORIES`, and the summary is coerced to a single
+        line of text (falling back to *fallback_summary* if blank).
 
         Raises:
-            ValueError: If *raw* is not valid JSON or is missing expected keys.
+            ClassificationError: If *raw* is not a JSON object with a valid
+                category.
         """
         try:
             data = json.loads(raw)
-        except json.JSONDecodeError as exc:
-            raise ValueError(f"Failed to parse LLM response as JSON: {exc}\nRaw: {raw}") from exc
+        except (json.JSONDecodeError, TypeError) as exc:
+            raise ClassificationError(f"reply is not valid JSON: {exc}; raw: {raw!r}") from exc
 
-        return {
-            "urgent": _normalise_list(data.get("urgent")),
-            "tasks": _normalise_list(data.get("tasks")),
-            "digest": _normalise_list(data.get("digest")),
-        }
+        if not isinstance(data, dict):
+            raise ClassificationError(f"reply is not a JSON object; raw: {raw!r}")
+
+        category = str(data.get("category", "")).strip().lower()
+        if category not in CATEGORIES:
+            raise ClassificationError(f"unknown category {data.get('category')!r}")
+
+        summary = re.sub(r"\s+", " ", str(data.get("summary") or "")).strip()
+        return cast(Category, category), summary or " ".join(str(fallback_summary).split())

@@ -58,6 +58,8 @@ Gmail API → provider_gmail.py → processor_ai.py (Ollama) → notifier_signal
 | `GMAIL_OAUTH_PORT`        | ❌       | `8085`                                |
 | `GMAIL_MAX_EMAILS`        | ❌       | `500`                                 |
 | `MAX_BODY_CHARS`          | ❌       | `6000`                                |
+| `OLLAMA_NUM_CTX`          | ❌       | `8192`                                |
+| `OLLAMA_TIMEOUT`          | ❌       | `120`                                 |
 | `OLLAMA_URL`              | ❌       | `http://localhost:11434`              |
 | `OLLAMA_MODEL`            | ❌       | `llama3`                              |
 

@@ -12,6 +12,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from config import Settings
+from processor_ai import TriagedItem, TriageResult
 
 
 # ---------------------------------------------------------------------------
@@ -39,12 +40,20 @@ def _sample_emails() -> list[dict]:
     ]
 
 
-def _sample_triage() -> dict:
-    return {
-        "urgent": ["Interview invite from techcorp.com – confirm today"],
-        "tasks": ["Return school trip permission slip by Friday"],
-        "digest": ["Weekly newsletter summary"],
-    }
+def _item(category: str, summary: str) -> TriagedItem:
+    return TriagedItem(
+        email_id="msg1", sender="a@b.c", subject="subj", category=category, summary=summary
+    )
+
+
+def _sample_triage() -> TriageResult:
+    return TriageResult(
+        items=(
+            _item("urgent", "Interview invite from techcorp.com – confirm today"),
+            _item("tasks", "Return school trip permission slip by Friday"),
+            _item("digest", "Weekly newsletter summary"),
+        )
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -121,9 +130,34 @@ class TestRunSuccess:
 
     def test_empty_inbox_completes_without_error(self):
         """An empty inbox should still send an 'all clear' briefing."""
-        triage = {"urgent": [], "tasks": [], "digest": []}
+        triage = TriageResult()
         mocks = self._run_with_mocks(emails=[], triage=triage)
         mocks["notifier"].send.assert_called_once_with(triage)
+
+
+# ---------------------------------------------------------------------------
+# Tests: triage summary logging
+# ---------------------------------------------------------------------------
+
+class TestTriageLogging:
+    def test_category_counts_logged(self, caplog):
+        import main
+
+        result = TriageResult(
+            items=(_item("urgent", "a"), _item("urgent", "b"), _item("ignore", "c")),
+            failed_ids=("x",),
+        )
+        processor = MagicMock()
+        processor.triage.return_value = result
+        with (
+            patch("main.GmailProvider"),
+            patch("main.AIProcessor", return_value=processor),
+            patch("main.SignalNotifier"),
+            caplog.at_level("INFO", logger="main"),
+        ):
+            main.run(_settings())
+
+        assert "urgent=2, tasks=0, digest=0, ignored=1, failed=1" in caplog.text
 
 
 # ---------------------------------------------------------------------------
@@ -136,7 +170,7 @@ class TestBodyCleaning:
         import main
 
         processor = MagicMock()
-        processor.triage.return_value = {"urgent": [], "tasks": [], "digest": []}
+        processor.triage.return_value = TriageResult()
         with (
             patch("main.GmailProvider") as gmail_cls,
             patch("main.AIProcessor", return_value=processor),
@@ -284,7 +318,7 @@ class TestDryRunEndToEnd:
 
         requests_mock.post(
             "http://localhost:11434/api/generate",
-            json={"response": json.dumps({"urgent": ["Reply to recruiter"], "tasks": [], "digest": []})},
+            json={"response": json.dumps({"category": "urgent", "summary": "Reply to recruiter"})},
         )
         settings = _settings(dry_run=True)
 
@@ -296,3 +330,22 @@ class TestDryRunEndToEnd:
         assert [r.hostname + ":" + str(r.port) for r in requests_mock.request_history] == [
             "localhost:11434"
         ]
+
+
+    def test_ignored_email_is_absent_from_the_briefing(self, requests_mock, capsys):
+        import json
+
+        import main
+
+        requests_mock.post(
+            "http://localhost:11434/api/generate",
+            json={"response": json.dumps({"category": "ignore", "summary": "Pills for cheap"})},
+        )
+
+        with patch("main.GmailProvider") as mock_gmail_cls:
+            mock_gmail_cls.from_credentials.return_value.fetch_unread_emails.return_value = _sample_emails()
+            main.run(_settings(dry_run=True))
+
+        out = capsys.readouterr().out
+        assert "Pills for cheap" not in out
+        assert "All clear" in out

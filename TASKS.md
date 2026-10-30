@@ -14,7 +14,7 @@ Test tasks are listed separately from implementation on purpose — they are the
 | 1 · Read the whole inbox | 10 | ✅ Done |
 | 2 · Understand every email | 9 | ✅ Done |
 | 3 · Strip the clutter | 12 | ✅ Done |
-| 4 · Bound input, new contract | 12 | ⬜ Not started |
+| 4 · Bound input, new contract | 12 | ✅ Done |
 | 5 · Constrain AI output | 12 | ⬜ Not started |
 | 6 · Fail loudly | 11 | ⬜ Not started |
 | 7–9 · Improvement | 21 | ⬜ Outline only |
@@ -165,27 +165,31 @@ Also done in this phase: `MAX_BODY_CHARS` is now read by `Settings.from_env()` (
 
 ---
 
-## Phase 4 · Bound the input, restructure the contract
+## Phase 4 · Bound the input, restructure the contract ✅
 
 The largest refactor in the plan. Per-email classification means the processor can no longer return three lists of bare strings.
 
 ### Implementation · `processor_ai.py`, `notifier_signal.py`, `main.py`
 
-- [ ] **Define `Category`, `TriagedItem`, `TriageResult`** · `M`
-- [ ] **Add the `ignore` category** — the prompt already says "ignore junk" but offers nowhere to put it, so junk currently lands in `digest` · `S`
-- [ ] **Write `_classify_one(email)`** — one email, one call, one verdict · `M`
-- [ ] **Rewrite `triage()` as a sequential loop** — collect verdicts, record failures, continue · `M`
-- [ ] **Log progress per email** — a silent 8-minute run is indistinguishable from a hang · `S`
-- [ ] **Bound the fields** — body via Phase 3, subject 200 chars, sender 100 · `S`
-- [ ] **Set `num_ctx` explicitly** — the original silent-overflow bug; Ollama's default discards the excess rather than erroring · `S`
-- [ ] **Update `format_message()` to take `TriageResult`** · `M`
-- [ ] **Filter `ignore` before formatting** · `S`
+- [x] **Define `Category`, `TriagedItem`, `TriageResult`** · `M`
+- [x] **Add the `ignore` category** — the prompt already says "ignore junk" but offers nowhere to put it, so junk currently lands in `digest` · `S`
+- [x] **Write `_classify_one(email)`** — one email, one call, one verdict · `M`
+- [x] **Rewrite `triage()` as a sequential loop** — collect verdicts, record failures, continue · `M`
+- [x] **Log progress per email** — a silent 8-minute run is indistinguishable from a hang · `S`
+- [x] **Bound the fields** — body via Phase 3, subject 200 chars, sender 100 · `S`
+- [x] **Set `num_ctx` explicitly** — the original silent-overflow bug; Ollama's default discards the excess rather than erroring · `S`
+- [x] **Update `format_message()` to take `TriageResult`** · `M`
+- [x] **Filter `ignore` before formatting** · `S`
 
 ### Tests
 
-- [ ] **Migrate processor tests to the new contract** · `L`
-- [ ] **Migrate notifier tests to the new contract** · `M`
-- [ ] **Migrate main tests to the new contract** · `M`
+- [x] **Migrate processor tests to the new contract** · `L`
+- [x] **Migrate notifier tests to the new contract** · `M`
+- [x] **Migrate main tests to the new contract** · `M`
+
+---
+
+Also done in this phase, ahead of its listed phase: **"Surface failures in the briefing"** (Phase 5) — `failed_ids` now exists, and shipping Phase 4 without it would let a total classification failure read as "All clear". Failures with no successful items show only the warning. `ClassificationError` was also introduced here (Phase 5 task "Add `ClassificationError`") because the Phase 4 loop needs something to catch; Phase 5 extends it to retries and response-shape guards. `OLLAMA_NUM_CTX` and `OLLAMA_TIMEOUT` are now read by `Settings.from_env()` and used (the old code hard-coded a 120s timeout). Decisions worth knowing: transport errors are deliberately not caught by the per-email loop — a dead Ollama should abort the run rather than record every email as failed; `TriagedItem` keeps the full subject/sender (only the *prompt* is truncated to 200/100); summaries are collapsed to one line and fall back to the subject if blank; `_normalise_list` is gone — category validation against a fixed set replaces it.
 
 ---
 
@@ -199,9 +203,9 @@ The largest refactor in the plan. Per-email classification means the processor c
 - [ ] **Set `temperature: 0`** — the same inbox twice should give the same briefing · `S`
 - [ ] **Retry wrapper** — `ollama_retries` attempts, 1s then 2s backoff · `M`
 - [ ] **Retry only what is retryable** — timeout, connection error, 5xx, schema-validation failure. Never 4xx · `S`
-- [ ] **Add `ClassificationError`** — raised after exhaustion, caught by Phase 4's loop · `S`
+- [ ] **Add `ClassificationError`** — raised after exhaustion, caught by Phase 4's loop · `S` _(class and parse-failure path exist from Phase 4; remaining: raise it on retry exhaustion)_
 - [ ] **Guard `response.json()["response"]`** — currently an unhandled `KeyError` if the shape differs · `S`
-- [ ] **Surface failures in the briefing** — "⚠️ 3 emails could not be classified". A silently short briefing is the failure mode being designed out · `S`
+- [x] **Surface failures in the briefing** — "⚠️ 3 emails could not be classified". A silently short briefing is the failure mode being designed out · `S` _(done in Phase 4)_
 
 ### Tests
 

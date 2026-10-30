@@ -11,8 +11,8 @@ Gmail API → provider_gmail.py → processor_ai.py (Ollama) → notifier_signal
 ```
 
 1. **Gmail Fetcher** (`provider_gmail.py`) – authenticates with OAuth 2.0 and retrieves unread emails from the last 24 hours.
-2. **AI Processor** (`processor_ai.py`) – sends the emails to a local Ollama LLM and returns a structured triage: `urgent`, `tasks`, and `digest`.
-3. **Signal Notifier** (`notifier_signal.py`) – formats the triage result and delivers it via the Signal REST API.
+2. **AI Processor** (`processor_ai.py`) – sends each email to a local Ollama LLM (one call per email) and returns a verdict per email: `urgent`, `tasks`, `digest`, or `ignore` (junk, left out of the briefing).
+3. **Signal Notifier** (`notifier_signal.py`) – formats the verdicts (and flags any email that could not be classified) and delivers it via the Signal REST API.
 4. **Orchestrator** (`main.py`) – wires the three modules together, reads configuration from `.env`, and handles errors gracefully.
 
 ---
@@ -106,6 +106,8 @@ GMAIL_CREDENTIALS_PATH=credentials.json
 GMAIL_OAUTH_PORT=8085                                  # Local port for the one-off OAuth consent flow
 GMAIL_MAX_EMAILS=500                                   # Safety cap per run; a warning is logged if it hides mail
 MAX_BODY_CHARS=6000                                    # Longest cleaned email body sent to the model
+OLLAMA_NUM_CTX=8192                                    # Context window requested from Ollama per email
+OLLAMA_TIMEOUT=120                                     # Seconds to wait for Ollama per email
 SIGNAL_API_URL=http://localhost:8080                   # Base URL of the Signal REST API container
 OLLAMA_URL=http://localhost:11434                      # Ollama BASE url — not the full /api/generate endpoint
 OLLAMA_MODEL=llama3
@@ -232,6 +234,8 @@ signalman/
 | `GMAIL_OAUTH_PORT`        | ❌       | `8085`                                | Local port used by the one-off OAuth consent flow      |
 | `GMAIL_MAX_EMAILS`        | ❌       | `500`                                 | Safety cap on emails processed per run (a warning is logged if it truncates) |
 | `MAX_BODY_CHARS`          | ❌       | `6000`                                | Longest email body (after cleaning) sent to the model; longer ones are truncated |
+| `OLLAMA_NUM_CTX`          | ❌       | `8192`                                | Context window (tokens) requested from Ollama for each email |
+| `OLLAMA_TIMEOUT`          | ❌       | `120`                                 | Seconds to wait for Ollama to answer one email |
 | `SIGNAL_API_URL`          | ❌       | `http://localhost:8080`               | Base URL of the Signal REST API container              |
 | `OLLAMA_URL`              | ❌       | `http://localhost:11434`              | Ollama **base** URL (not the full API endpoint)        |
 | `OLLAMA_MODEL`            | ❌       | `llama3`                              | LLM model to use for triage                            |
