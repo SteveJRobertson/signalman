@@ -32,10 +32,10 @@ docker run -d --name signal-api -p 8080:8080 \
 
 ## Architecture
 
-`main.py` is a linear orchestrator over three single-responsibility modules:
+`main.py` is a linear orchestrator over three single-responsibility modules, with a pure cleaning step between fetch and triage:
 
 ```
-GmailProvider.fetch_unread_emails() → AIProcessor.triage() → SignalNotifier.send()
+GmailProvider.fetch_unread_emails() → cleaner.clean() → AIProcessor.triage() → SignalNotifier.send()
 ```
 
 Two dict shapes are the contract between every module and every test — change one and all four modules plus their tests move together:
@@ -51,7 +51,8 @@ Things that are easy to get wrong:
 - **`SignalNotifier.send()` probes `GET /v1/about` first** and raises `ConnectionError` if the container is down, before `POST /v2/send`. Both calls must be mocked in tests. With `settings.dry_run` it prints the message and returns before either call.
 - **Gmail OAuth is headless.** `flow.run_local_server(open_browser=False)` on a fixed port (`GMAIL_OAUTH_PORT`, default 8085) so the flow works over SSH; the redirect URI must match in the Google Cloud console.
 - **`GmailProvider.fetch_unread_emails()` pages through `messages.list` (100 per page) up to `gmail_max_emails`, then fetches in batches of 50 via `new_batch_http_request()`.** Batch callbacks fire in arbitrary order, so results are re-sorted to listing order; a failed message lands in `provider.failed_ids` and is skipped. Tests use the `FakeBatch` helper in `tests/test_provider_gmail.py` — a bare `MagicMock` service returns no emails.
-- `GmailProvider._extract_body()` walks nested multipart payloads, prefers the first non-blank `text/plain` part, and falls back to the first non-blank `text/html` part converted by `html2text` (images/links/emphasis dropped, table scaffolding and blank-line runs stripped). Plain text is returned unmodified — whitespace cleanup is Phase 3's job. An HTML-only test fixture is required for any change here; the old suite had none, which hid the original bug.
+- **`cleaner.clean(body, *, max_chars)` is pure (no I/O) and applied per email in `main.run`**, not inside the provider or processor. It cuts quoted replies and signatures at the earliest marker, drops trailing footer lines, normalises whitespace, then truncates on a word boundary (total length including the `… [truncated]` marker is ≤ `max_chars`). **Safety rule: it never returns an empty string for a non-empty body** — if the heuristics strip everything it falls back to the truncated original. Any new pattern must keep that property; a wrongly-empty body silently drops an email.
+- `GmailProvider._extract_body()` walks nested multipart payloads, prefers the first non-blank `text/plain` part, and falls back to the first non-blank `text/html` part converted by `html2text` (images/links/emphasis dropped, table scaffolding and blank-line runs stripped). Plain text is returned unmodified; cleanup happens next, in `cleaner.py`. An HTML-only test fixture is required for any change here; the old suite had none, which hid the original bug.
 
 ## Conventions
 

@@ -98,6 +98,10 @@ class Settings:
         if gmail_max_emails < 1:
             raise ValueError(f"GMAIL_MAX_EMAILS must be at least 1, got {gmail_max_emails}")
 
+        max_body_chars = _env_int("MAX_BODY_CHARS", _DEFAULT_MAX_BODY_CHARS)
+        if max_body_chars < 1:
+            raise ValueError(f"MAX_BODY_CHARS must be at least 1, got {max_body_chars}")
+
         return cls(
             signal_sender=os.environ["SIGNAL_SENDER_NUMBER"],
             signal_recipient=os.environ["SIGNAL_RECIPIENT_NUMBER"],
@@ -110,4 +114,5 @@ class Settings:
             gmail_max_emails=gmail_max_emails,
             ollama_url=ollama_url,
             ollama_model=os.getenv("OLLAMA_MODEL", _DEFAULT_OLLAMA_MODEL),
+            max_body_chars=max_body_chars,
         )

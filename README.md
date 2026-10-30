@@ -105,6 +105,7 @@ GMAIL_TOKEN_PATH=token.json
 GMAIL_CREDENTIALS_PATH=credentials.json
 GMAIL_OAUTH_PORT=8085                                  # Local port for the one-off OAuth consent flow
 GMAIL_MAX_EMAILS=500                                   # Safety cap per run; a warning is logged if it hides mail
+MAX_BODY_CHARS=6000                                    # Longest cleaned email body sent to the model
 SIGNAL_API_URL=http://localhost:8080                   # Base URL of the Signal REST API container
 OLLAMA_URL=http://localhost:11434                      # Ollama BASE url — not the full /api/generate endpoint
 OLLAMA_MODEL=llama3
@@ -201,6 +202,7 @@ All tests are fully mocked – no Gmail credentials, Ollama instance, or Signal 
 signalman/
 ├── main.py                   # Orchestrator
 ├── provider_gmail.py         # Gmail fetcher
+├── cleaner.py                # Strips quoted replies, signatures, footers; bounds length
 ├── processor_ai.py           # Ollama AI triage
 ├── notifier_signal.py        # Signal messenger
 ├── signalman_daily.plist     # macOS launchd schedule
@@ -211,6 +213,8 @@ signalman/
 └── tests/
     ├── test_main.py
     ├── test_provider_gmail.py
+    ├── test_cleaner.py
+    ├── test_config.py
     ├── test_processor.py
     └── test_notifier.py
 ```
@@ -227,6 +231,7 @@ signalman/
 | `GMAIL_CREDENTIALS_PATH`  | ❌       | `credentials.json`                    | Path to the OAuth2 credentials file                    |
 | `GMAIL_OAUTH_PORT`        | ❌       | `8085`                                | Local port used by the one-off OAuth consent flow      |
 | `GMAIL_MAX_EMAILS`        | ❌       | `500`                                 | Safety cap on emails processed per run (a warning is logged if it truncates) |
+| `MAX_BODY_CHARS`          | ❌       | `6000`                                | Longest email body (after cleaning) sent to the model; longer ones are truncated |
 | `SIGNAL_API_URL`          | ❌       | `http://localhost:8080`               | Base URL of the Signal REST API container              |
 | `OLLAMA_URL`              | ❌       | `http://localhost:11434`              | Ollama **base** URL (not the full API endpoint)        |
 | `OLLAMA_MODEL`            | ❌       | `llama3`                              | LLM model to use for triage                            |

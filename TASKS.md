@@ -13,7 +13,7 @@ Test tasks are listed separately from implementation on purpose — they are the
 | 0c · Preview mode | 6 | ✅ Done |
 | 1 · Read the whole inbox | 10 | ✅ Done |
 | 2 · Understand every email | 9 | ✅ Done |
-| 3 · Strip the clutter | 12 | ⬜ Not started |
+| 3 · Strip the clutter | 12 | ✅ Done |
 | 4 · Bound input, new contract | 12 | ⬜ Not started |
 | 5 · Constrain AI output | 12 | ⬜ Not started |
 | 6 · Fail loudly | 11 | ⬜ Not started |
@@ -137,27 +137,31 @@ Also done in this phase: after the first real conversion, layout tables left `--
 
 ---
 
-## Phase 3 · Strip the clutter
+## Phase 3 · Strip the clutter ✅
 
 New `cleaner.py`. Pure functions, no I/O, no dependencies — the most testable module in the project.
 
 ### Implementation
 
-- [ ] **Create `cleaner.py`** — `clean(body, *, max_chars) -> str` · `S`
-- [ ] **Quoted-reply patterns** — `On … wrote:`, `----- Original Message -----`, Outlook underscore rule, `From:`/`Sent:` pairs, consecutive `>` lines · `L`
-- [ ] **Signature patterns** — `--` delimiter (RFC 3676), mobile sign-offs · `M`
-- [ ] **Footer patterns** — unsubscribe, view-in-browser, "you are receiving this", physical addresses · `M`
-- [ ] **Whitespace normalisation** — collapse 3+ newlines, strip trailing spaces · `S`
-- [ ] **Word-boundary truncation** — to `max_chars`, append `… [truncated]` · `S`
-- [ ] **Never-return-empty rule** — if the heuristics strip everything, return the truncated original · `S`
-- [ ] **Wire into the pipeline** — after extraction, before classification · `S`
+- [x] **Create `cleaner.py`** — `clean(body, *, max_chars) -> str` · `S`
+- [x] **Quoted-reply patterns** — `On … wrote:`, `----- Original Message -----`, Outlook underscore rule, `From:`/`Sent:` pairs, consecutive `>` lines · `L`
+- [x] **Signature patterns** — `--` delimiter (RFC 3676), mobile sign-offs · `M`
+- [x] **Footer patterns** — unsubscribe, view-in-browser, "you are receiving this", physical addresses · `M`
+- [x] **Whitespace normalisation** — collapse 3+ newlines, strip trailing spaces · `S`
+- [x] **Word-boundary truncation** — to `max_chars`, append `… [truncated]` · `S`
+- [x] **Never-return-empty rule** — if the heuristics strip everything, return the truncated original · `S`
+- [x] **Wire into the pipeline** — after extraction, before classification · `S`
 
 ### Tests
 
-- [ ] **Fixtures** — Gmail chain, Outlook chain, `--` signature, mobile signature, newsletter footer · `M`
-- [ ] **Table-driven cases over the fixtures** · `M`
-- [ ] **A body that is only a quote does not empty out** — the safety rule; a wrongly-empty body silently drops an email from consideration · `S`
-- [ ] **A clean body passes through unchanged** · `S`
+- [x] **Fixtures** — Gmail chain, Outlook chain, `--` signature, mobile signature, newsletter footer · `M`
+- [x] **Table-driven cases over the fixtures** · `M`
+- [x] **A body that is only a quote does not empty out** — the safety rule; a wrongly-empty body silently drops an email from consideration · `S`
+- [x] **A clean body passes through unchanged** · `S`
+
+---
+
+Also done in this phase: `MAX_BODY_CHARS` is now read by `Settings.from_env()` (it existed on the dataclass but could not be set; values below 1 are rejected) and documented in the env tables. Decisions worth knowing: truncation counts the `… [truncated]` marker inside `max_chars`, so the bound is hard; footer removal works within blocks, cutting from the first footer-looking line, because html2text puts the footer on lines directly under the last content line (a first version dropped whole blocks and lost "Pay now"); address patterns are case-sensitive so prose such as "call me at 5 on my way" is not mistaken for a street address; a `>` run of four or more lines cuts everything after it, as specced, which drops interleaved inline replies — accepted for now.
 
 ---
 

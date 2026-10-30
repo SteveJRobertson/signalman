@@ -127,6 +127,55 @@ class TestRunSuccess:
 
 
 # ---------------------------------------------------------------------------
+# Tests: body cleaning between fetch and triage
+# ---------------------------------------------------------------------------
+
+class TestBodyCleaning:
+    def _triage_input(self, emails, settings=None):
+        """Run main.run with mocks and return what the processor was given."""
+        import main
+
+        processor = MagicMock()
+        processor.triage.return_value = {"urgent": [], "tasks": [], "digest": []}
+        with (
+            patch("main.GmailProvider") as gmail_cls,
+            patch("main.AIProcessor", return_value=processor),
+            patch("main.SignalNotifier"),
+        ):
+            gmail_cls.from_credentials.return_value.fetch_unread_emails.return_value = emails
+            main.run(settings or _settings())
+        return processor.triage.call_args.args[0]
+
+    def test_quoted_history_and_signature_removed_before_triage(self):
+        body = "Yes, 3pm works.\n\nOn Mon, X wrote:\n> old\n\n-- \nSig"
+        emails = [{"id": "a", "subject": "S", "sender": "x@y.z", "body": body}]
+
+        result = self._triage_input(emails)
+
+        assert result[0]["body"] == "Yes, 3pm works."
+
+    def test_body_is_bounded_by_max_body_chars(self):
+        emails = [{"id": "a", "subject": "S", "sender": "x@y.z", "body": "word " * 1000}]
+
+        result = self._triage_input(emails, _settings(max_body_chars=200))
+
+        assert len(result[0]["body"]) <= 200
+
+    def test_other_fields_untouched_and_input_not_mutated(self):
+        emails = [{"id": "a", "subject": "Subj", "sender": "x@y.z", "body": "hi\n\n\n\nthere"}]
+
+        result = self._triage_input(emails)
+
+        assert (result[0]["id"], result[0]["subject"], result[0]["sender"]) == ("a", "Subj", "x@y.z")
+        assert emails[0]["body"] == "hi\n\n\n\nthere"
+
+    def test_empty_body_stays_empty_string(self):
+        emails = [{"id": "a", "subject": "S", "sender": "x@y.z", "body": ""}]
+
+        assert self._triage_input(emails)[0]["body"] == ""
+
+
+# ---------------------------------------------------------------------------
 # Tests: __main__ block error handling
 # ---------------------------------------------------------------------------
 #
