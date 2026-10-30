@@ -118,6 +118,39 @@ class TestNumericCoercion:
 # Tests: OLLAMA_URL breaking-change guard
 # ---------------------------------------------------------------------------
 
+class TestGmailMaxEmails:
+    def test_default(self, monkeypatch):
+        _set_required(monkeypatch)
+        monkeypatch.delenv("GMAIL_MAX_EMAILS", raising=False)
+
+        assert Settings.from_env().gmail_max_emails == 500
+
+    def test_custom_value(self, monkeypatch):
+        _set_required(monkeypatch)
+        monkeypatch.setenv("GMAIL_MAX_EMAILS", "50")
+
+        assert Settings.from_env().gmail_max_emails == 50
+
+    def test_non_numeric_names_the_variable(self, monkeypatch):
+        _set_required(monkeypatch)
+        monkeypatch.setenv("GMAIL_MAX_EMAILS", "lots")
+
+        with pytest.raises(ValueError, match="GMAIL_MAX_EMAILS"):
+            Settings.from_env()
+
+    @pytest.mark.parametrize("bad", ["0", "-5"])
+    def test_below_one_rejected(self, monkeypatch, bad):
+        _set_required(monkeypatch)
+        monkeypatch.setenv("GMAIL_MAX_EMAILS", bad)
+
+        with pytest.raises(ValueError, match="GMAIL_MAX_EMAILS"):
+            Settings.from_env()
+
+
+# ---------------------------------------------------------------------------
+# Tests: OLLAMA_URL guard
+# ---------------------------------------------------------------------------
+
 class TestOllamaUrlGuard:
     def test_base_url_accepted(self, monkeypatch):
         _set_required(monkeypatch)

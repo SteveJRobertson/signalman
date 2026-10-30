@@ -94,6 +94,10 @@ class Settings:
                 "Remove the trailing '/api/generate'."
             )
 
+        gmail_max_emails = _env_int("GMAIL_MAX_EMAILS", _DEFAULT_GMAIL_MAX_EMAILS)
+        if gmail_max_emails < 1:
+            raise ValueError(f"GMAIL_MAX_EMAILS must be at least 1, got {gmail_max_emails}")
+
         return cls(
             signal_sender=os.environ["SIGNAL_SENDER_NUMBER"],
             signal_recipient=os.environ["SIGNAL_RECIPIENT_NUMBER"],
@@ -103,6 +107,7 @@ class Settings:
                 os.getenv("GMAIL_CREDENTIALS_PATH", _DEFAULT_GMAIL_CREDENTIALS_PATH)
             ),
             gmail_oauth_port=_env_int("GMAIL_OAUTH_PORT", _DEFAULT_GMAIL_OAUTH_PORT),
+            gmail_max_emails=gmail_max_emails,
             ollama_url=ollama_url,
             ollama_model=os.getenv("OLLAMA_MODEL", _DEFAULT_OLLAMA_MODEL),
         )

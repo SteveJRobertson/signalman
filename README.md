@@ -104,6 +104,7 @@ SIGNAL_RECIPIENT_NUMBER=+447700900001  # Your personal phone number (the number 
 GMAIL_TOKEN_PATH=token.json
 GMAIL_CREDENTIALS_PATH=credentials.json
 GMAIL_OAUTH_PORT=8085                                  # Local port for the one-off OAuth consent flow
+GMAIL_MAX_EMAILS=500                                   # Safety cap per run; a warning is logged if it hides mail
 SIGNAL_API_URL=http://localhost:8080                   # Base URL of the Signal REST API container
 OLLAMA_URL=http://localhost:11434                      # Ollama BASE url — not the full /api/generate endpoint
 OLLAMA_MODEL=llama3
@@ -225,6 +226,7 @@ signalman/
 | `GMAIL_TOKEN_PATH`        | ❌       | `token.json`                          | Path to the OAuth2 token file                          |
 | `GMAIL_CREDENTIALS_PATH`  | ❌       | `credentials.json`                    | Path to the OAuth2 credentials file                    |
 | `GMAIL_OAUTH_PORT`        | ❌       | `8085`                                | Local port used by the one-off OAuth consent flow      |
+| `GMAIL_MAX_EMAILS`        | ❌       | `500`                                 | Safety cap on emails processed per run (a warning is logged if it truncates) |
 | `SIGNAL_API_URL`          | ❌       | `http://localhost:8080`               | Base URL of the Signal REST API container              |
 | `OLLAMA_URL`              | ❌       | `http://localhost:11434`              | Ollama **base** URL (not the full API endpoint)        |
 | `OLLAMA_MODEL`            | ❌       | `llama3`                              | LLM model to use for triage                            |
