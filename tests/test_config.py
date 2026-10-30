@@ -147,6 +147,25 @@ class TestGmailMaxEmails:
             Settings.from_env()
 
 
+class TestOllamaNumCtxAndTimeout:
+    @pytest.mark.parametrize(
+        ("var", "attr", "default"),
+        [("OLLAMA_NUM_CTX", "ollama_num_ctx", 8192), ("OLLAMA_TIMEOUT", "ollama_timeout", 120)],
+    )
+    def test_default_custom_and_invalid(self, monkeypatch, var, attr, default):
+        _set_required(monkeypatch)
+        monkeypatch.delenv(var, raising=False)
+        assert getattr(Settings.from_env(), attr) == default
+
+        monkeypatch.setenv(var, "99")
+        assert getattr(Settings.from_env(), attr) == 99
+
+        for bad in ("abc", "0", "-4"):
+            monkeypatch.setenv(var, bad)
+            with pytest.raises(ValueError, match=var):
+                Settings.from_env()
+
+
 class TestMaxBodyChars:
     def test_default(self, monkeypatch):
         _set_required(monkeypatch)

@@ -1,7 +1,7 @@
 """Signal notifier for Signalman.
 
-Formats the AI-generated triage JSON into a human-readable message and
-delivers it via the Signal REST API running in a Docker container.
+Formats a :class:`~processor_ai.TriageResult` into a human-readable message
+and delivers it via the Signal REST API running in a Docker container.
 """
 
 from __future__ import annotations
@@ -9,6 +9,7 @@ from __future__ import annotations
 import requests
 
 from config import Settings
+from processor_ai import TriageResult
 
 
 class SignalNotifier:
@@ -24,13 +25,12 @@ class SignalNotifier:
     # Public API
     # ------------------------------------------------------------------
 
-    def send(self, triage: dict[str, list[str]]) -> None:
-        """Format *triage* and deliver it via the Signal REST API.
+    def send(self, result: TriageResult) -> None:
+        """Format *result* and deliver it via the Signal REST API.
 
         Args:
-            triage: A dict with keys ``urgent``, ``tasks``, and ``digest``,
-                    each mapping to a list of concise string descriptions
-                    (as returned by :class:`~processor_ai.AIProcessor`).
+            result: The triage verdicts, as returned by
+                :meth:`~processor_ai.AIProcessor.triage`.
 
         In dry-run mode (``settings.dry_run``) the message is printed to
         stdout and no HTTP request is made.
@@ -39,7 +39,7 @@ class SignalNotifier:
             ConnectionError: If the Signal API Docker container is unreachable.
             requests.HTTPError: If the API returns a non-2xx response.
         """
-        message = self.format_message(triage)
+        message = self.format_message(result)
         if self.settings.dry_run:
             print(message)
             return
@@ -81,40 +81,37 @@ class SignalNotifier:
             ) from exc
 
     @staticmethod
-    def format_message(triage: dict[str, list[str]]) -> str:
-        """Convert a triage dict into a clean, readable Signal message.
+    def format_message(result: TriageResult) -> str:
+        """Convert a :class:`TriageResult` into a clean, readable Signal message.
 
-        Args:
-            triage: A dict with keys ``urgent``, ``tasks``, and ``digest``.
+        ``ignore`` items are never shown. Emails that could not be classified
+        are called out explicitly: a silently short briefing is
+        indistinguishable from a quiet inbox.
 
         Returns:
             A multi-line string ready to be sent as a Signal message.
         """
         sections: list[str] = ["📬 *Signalman Daily Briefing*\n"]
+        shown = False
 
-        urgent = triage.get("urgent", [])
-        tasks = triage.get("tasks", [])
-        digest = triage.get("digest", [])
-
-        if urgent:
-            sections.append("🚨 *Urgent*")
-            for item in urgent:
-                sections.append(f"  • {item}")
+        for heading, category in (
+            ("🚨 *Urgent*", "urgent"),
+            ("✅ *Tasks*", "tasks"),
+            ("📰 *Digest*", "digest"),
+        ):
+            items = result.by_category(category)
+            if not items:
+                continue
+            shown = True
+            sections.append(heading)
+            sections.extend(f"  • {item.summary}" for item in items)
             sections.append("")
 
-        if tasks:
-            sections.append("✅ *Tasks*")
-            for item in tasks:
-                sections.append(f"  • {item}")
-            sections.append("")
-
-        if digest:
-            sections.append("📰 *Digest*")
-            for item in digest:
-                sections.append(f"  • {item}")
-            sections.append("")
-
-        if not urgent and not tasks and not digest:
+        if result.failed_ids:
+            count = len(result.failed_ids)
+            noun = "email" if count == 1 else "emails"
+            sections.append(f"⚠️ {count} {noun} could not be classified")
+        elif not shown:
             sections.append("All clear – no items to report today.")
 
         return "\n".join(sections).rstrip()

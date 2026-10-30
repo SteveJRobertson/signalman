@@ -98,6 +98,12 @@ class Settings:
         if gmail_max_emails < 1:
             raise ValueError(f"GMAIL_MAX_EMAILS must be at least 1, got {gmail_max_emails}")
 
+        ollama_num_ctx = _env_int("OLLAMA_NUM_CTX", _DEFAULT_OLLAMA_NUM_CTX)
+        ollama_timeout = _env_int("OLLAMA_TIMEOUT", _DEFAULT_OLLAMA_TIMEOUT)
+        for name, value in (("OLLAMA_NUM_CTX", ollama_num_ctx), ("OLLAMA_TIMEOUT", ollama_timeout)):
+            if value < 1:
+                raise ValueError(f"{name} must be at least 1, got {value}")
+
         max_body_chars = _env_int("MAX_BODY_CHARS", _DEFAULT_MAX_BODY_CHARS)
         if max_body_chars < 1:
             raise ValueError(f"MAX_BODY_CHARS must be at least 1, got {max_body_chars}")
@@ -114,5 +120,7 @@ class Settings:
             gmail_max_emails=gmail_max_emails,
             ollama_url=ollama_url,
             ollama_model=os.getenv("OLLAMA_MODEL", _DEFAULT_OLLAMA_MODEL),
+            ollama_num_ctx=ollama_num_ctx,
+            ollama_timeout=ollama_timeout,
             max_body_chars=max_body_chars,
         )

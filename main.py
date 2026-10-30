@@ -90,17 +90,19 @@ def run(settings: Settings) -> None:
 
     logger.info("Triaging emails with AI processor…")
     processor = AIProcessor(settings)
-    triage = processor.triage(emails)
+    result = processor.triage(emails)
     logger.info(
-        "Triage complete – urgent=%d, tasks=%d, digest=%d.",
-        len(triage["urgent"]),
-        len(triage["tasks"]),
-        len(triage["digest"]),
+        "Triage complete – urgent=%d, tasks=%d, digest=%d, ignored=%d, failed=%d.",
+        len(result.by_category("urgent")),
+        len(result.by_category("tasks")),
+        len(result.by_category("digest")),
+        len(result.by_category("ignore")),
+        len(result.failed_ids),
     )
 
     logger.info("Sending Signal briefing…")
     notifier = SignalNotifier(settings)
-    notifier.send(triage)
+    notifier.send(result)
     logger.info("Briefing sent successfully.")
 
 
