@@ -294,3 +294,29 @@ class TestErrorHandling:
         result = AIProcessor(_settings()).triage(_sample_emails())
 
         assert result["urgent"] == []
+
+
+# ---------------------------------------------------------------------------
+# Tests: verbose (DEBUG) logging of prompt and raw reply
+# ---------------------------------------------------------------------------
+
+class TestDebugLogging:
+    def test_prompt_and_raw_reply_logged_at_debug(self, requests_mock, caplog):
+        _register_ollama_response(requests_mock, {"urgent": ["raw-reply-marker"], "tasks": [], "digest": []})
+        processor = AIProcessor(_settings())
+
+        with caplog.at_level("DEBUG", logger="processor_ai"):
+            processor.triage(_sample_emails())
+
+        assert "Ollama prompt" in caplog.text
+        assert "Interview invitation" in caplog.text
+        assert "raw-reply-marker" in caplog.text
+
+    def test_nothing_logged_at_info(self, requests_mock, caplog):
+        _register_ollama_response(requests_mock, {"urgent": [], "tasks": [], "digest": []})
+        processor = AIProcessor(_settings())
+
+        with caplog.at_level("INFO", logger="processor_ai"):
+            processor.triage(_sample_emails())
+
+        assert "Ollama prompt" not in caplog.text

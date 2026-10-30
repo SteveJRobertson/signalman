@@ -10,7 +10,7 @@ Test tasks are listed separately from implementation on purpose — they are the
 | 0 · Secure the keys | 4 | ✅ Done |
 | 0a · Reconcile the environment | 4 | ✅ Done |
 | 0b · Settings object | 13 | ✅ Done |
-| 0c · Preview mode | 6 | ⬜ Not started |
+| 0c · Preview mode | 6 | ✅ Done |
 | 1 · Read the whole inbox | 10 | ⬜ Not started |
 | 2 · Understand every email | 9 | ⬜ Not started |
 | 3 · Strip the clutter | 12 | ⬜ Not started |
@@ -71,16 +71,20 @@ Every phase below adds configuration; doing this last would mean doing it nine t
 
 ---
 
-## Phase 0c · Preview mode
+## Phase 0c · Preview mode ✅
 
 Do this before touching the classification prompt. Without it, every experiment messages your real phone, which is exactly why prompt tuning never happens.
 
-- [ ] **Add an `argparse` CLI to `main.py`** — stdlib, no dependency · `M`
-- [ ] **`--dry-run`** — print the briefing, make no Signal call · `S`
-- [ ] **`--limit N`** — cap emails processed, for fast iteration · `S`
-- [ ] **`--verbose`** — DEBUG logging including each prompt and raw reply. This is the flag that makes prompt tuning possible · `S`
-- [ ] **Test: `--dry-run` issues no HTTP request** — assert against `requests_mock` call count · `S`
-- [ ] **Document preview mode** in the README · `S`
+- [x] **Add an `argparse` CLI to `main.py`** — stdlib, no dependency · `M`
+- [x] **`--dry-run`** — print the briefing, make no Signal call (the notifier prints and returns before the reachability probe) · `S`
+- [x] **`--limit N`** — cap emails processed, for fast iteration · `S`
+- [x] **`--verbose`** — DEBUG logging including each prompt and raw reply. This is the flag that makes prompt tuning possible · `S`
+- [x] **Test: `--dry-run` issues no HTTP request** — assert against `requests_mock` call count · `S`
+- [x] **Document preview mode** in the README · `S`
+
+---
+
+Also done in this phase: the `GmailProvider` now takes `max_emails` (from `Settings.gmail_max_emails`) and warns when it truncates, so `--limit` saves fetch time; and the `runpy` tests in `tests/test_main.py` no longer depend on a local `.env` or on pytest's `sys.argv`.
 
 ---
 

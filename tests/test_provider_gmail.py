@@ -299,3 +299,39 @@ class TestMalformedEmails:
         assert result[0]["subject"] == ""
         assert result[0]["sender"] == ""
         assert result[0]["body"] == ""
+
+
+# ---------------------------------------------------------------------------
+# Tests: max_emails cap (used by --limit)
+# ---------------------------------------------------------------------------
+
+class TestMaxEmailsCap:
+    def _service(self, n: int) -> MagicMock:
+        msgs = [_make_message(f"m{i}", f"S{i}", "a@b.com", "body") for i in range(n)]
+        return _build_mock_service({"messages": [{"id": m["id"]} for m in msgs]}, msgs)
+
+    def test_cap_limits_messages_fetched(self):
+        service = self._service(5)
+        provider = GmailProvider(service, max_emails=2)
+
+        result = provider.fetch_unread_emails()
+
+        assert [e["id"] for e in result] == ["m0", "m1"]
+        assert service.users.return_value.messages.return_value.get.call_count == 2
+
+    def test_cap_logs_warning_when_truncating(self, caplog):
+        provider = GmailProvider(self._service(5), max_emails=2)
+
+        with caplog.at_level("WARNING"):
+            provider.fetch_unread_emails()
+
+        assert "2 of 5" in caplog.text
+
+    def test_no_warning_when_under_cap(self, caplog):
+        provider = GmailProvider(self._service(2), max_emails=5)
+
+        with caplog.at_level("WARNING"):
+            result = provider.fetch_unread_emails()
+
+        assert len(result) == 2
+        assert caplog.text == ""

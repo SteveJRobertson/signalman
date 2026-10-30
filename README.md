@@ -119,6 +119,20 @@ python3 main.py
 
 You should receive a Signal message within a few seconds. Check the terminal for any errors.
 
+#### Preview mode
+
+To see the briefing without messaging your phone — for example while tuning the classification prompt — use the flags below. Gmail and Ollama are still contacted; Signal is not (the container does not even need to be running).
+
+| Flag        | Effect                                                                    |
+| ----------- | ------------------------------------------------------------------------- |
+| `--dry-run` | Print the briefing to stdout; make no Signal call                         |
+| `--limit N` | Process at most N emails (also caps how many are fetched from Gmail)      |
+| `--verbose` | DEBUG logging, including each AI prompt and the model's raw reply        |
+
+```bash
+python3 main.py --dry-run --limit 10 --verbose
+```
+
 ---
 
 ### 9. Schedule with launchd (runs every day at 08:00)

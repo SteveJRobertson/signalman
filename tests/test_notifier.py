@@ -234,3 +234,30 @@ class TestSendFailure:
         notifier = SignalNotifier(_settings())
         with pytest.raises(ConnectionError):
             notifier.send(_sample_triage())
+
+
+# ---------------------------------------------------------------------------
+# Tests: dry-run mode
+# ---------------------------------------------------------------------------
+
+class TestDryRun:
+    def test_dry_run_makes_no_http_requests(self, requests_mock):
+        notifier = SignalNotifier(_settings(dry_run=True))
+
+        notifier.send(_sample_triage())
+
+        assert requests_mock.call_count == 0
+
+    def test_dry_run_prints_briefing(self, capsys):
+        notifier = SignalNotifier(_settings(dry_run=True))
+
+        notifier.send(_sample_triage())
+
+        out = capsys.readouterr().out
+        assert "Signalman Daily Briefing" in out
+        assert "Interview invite" in out
+
+    def test_dry_run_does_not_need_container_up(self, requests_mock):
+        """Previewing must work with the Signal container stopped."""
+        requests_mock.get("http://localhost:8080/v1/about", exc=requests.exceptions.ConnectionError)
+        SignalNotifier(_settings(dry_run=True)).send(_empty_triage())
