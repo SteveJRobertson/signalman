@@ -17,6 +17,7 @@ python3 -m pytest tests/test_processor.py::TestTriageCombined::test_empty_email_
 python3 -m pytest -k empty         # by keyword
 
 python3 main.py                    # real run: needs Ollama, the Signal container, and .env
+python3 main.py --dry-run --limit 5 --verbose   # preview: prints the briefing, no Signal call
 ```
 
 There is no linter or formatter configured, and no `pyproject.toml`/`setup.py`/`conftest.py`. Modules are flat top-level imports, so **pytest must be run from the repo root** — `tests/test_main.py` does `import main` and `runpy.run_module("main")`.
@@ -44,10 +45,10 @@ Two dict shapes are the contract between every module and every test — change 
 
 Things that are easy to get wrong:
 
-- **All settings live in one place: `config.py`'s `Settings` dataclass**, built once via `Settings.from_env()` in `main.py`'s `__main__` block and passed as a single argument into `GmailProvider.from_credentials()`, `AIProcessor()`, and `SignalNotifier()`. There is no per-module env reading and no duplicated defaults — if you're tempted to add a new `os.getenv(...)` call inside one of those modules, add a field to `Settings` instead.
+- **All settings live in one place: `config.py`'s `Settings` dataclass**, built once via `Settings.from_env()` in `main.py`'s `__main__` block (CLI flags `--dry-run`/`--limit` are applied afterwards with `dataclasses.replace`, since `Settings` is frozen) and passed as a single argument into `GmailProvider.from_credentials()`, `AIProcessor()`, and `SignalNotifier()`. There is no per-module env reading and no duplicated defaults — if you're tempted to add a new `os.getenv(...)` call inside one of those modules, add a field to `Settings` instead.
 - **`OLLAMA_URL` is a base URL** (e.g. `http://localhost:11434`), not a full endpoint — `AIProcessor` appends `/api/generate` itself. `Settings.from_env()` raises `ValueError` at startup if the value still ends in `/api/generate`, since that was the pre-Phase-0b form and silently 404s otherwise.
 - **LLM output is untrusted in shape, not just content.** `processor_ai._normalise_list()` coerces whatever the model returns (bare string, `None`, int, tuple) into `list[str]`. Keep new LLM-derived fields going through it. Prompt injection from email bodies is a documented, accepted risk for this local personal tool — the mitigation is that everything is stringified.
-- **`SignalNotifier.send()` probes `GET /v1/about` first** and raises `ConnectionError` if the container is down, before `POST /v2/send`. Both calls must be mocked in tests.
+- **`SignalNotifier.send()` probes `GET /v1/about` first** and raises `ConnectionError` if the container is down, before `POST /v2/send`. Both calls must be mocked in tests. With `settings.dry_run` it prints the message and returns before either call.
 - **Gmail OAuth is headless.** `flow.run_local_server(open_browser=False)` on a fixed port (`GMAIL_OAUTH_PORT`, default 8085) so the flow works over SSH; the redirect URI must match in the Google Cloud console.
 - `GmailProvider._extract_body()` recurses through nested multipart payloads and returns the first `text/plain` part it finds.
 

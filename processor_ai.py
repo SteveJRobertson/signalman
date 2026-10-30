@@ -11,12 +11,15 @@ structured JSON summary with three categories:
 from __future__ import annotations
 
 import json
+import logging
 import textwrap
 from typing import Any
 
 import requests
 
 from config import Settings
+
+logger = logging.getLogger(__name__)
 
 
 def _normalise_list(value: Any) -> list[str]:
@@ -124,9 +127,12 @@ class AIProcessor:
             "prompt": prompt,
             "stream": False,
         }
+        logger.debug("Ollama prompt:\n%s", prompt)
         response = requests.post(self.generate_url, json=payload, timeout=120)
         response.raise_for_status()
-        return response.json()["response"]
+        raw = response.json()["response"]
+        logger.debug("Ollama raw reply:\n%s", raw)
+        return raw
 
     @staticmethod
     def _parse_response(raw: str) -> dict[str, list[str]]:

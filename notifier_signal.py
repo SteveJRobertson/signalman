@@ -32,12 +32,18 @@ class SignalNotifier:
                     each mapping to a list of concise string descriptions
                     (as returned by :class:`~processor_ai.AIProcessor`).
 
+        In dry-run mode (``settings.dry_run``) the message is printed to
+        stdout and no HTTP request is made.
+
         Raises:
             ConnectionError: If the Signal API Docker container is unreachable.
             requests.HTTPError: If the API returns a non-2xx response.
         """
-        self._check_reachable()
         message = self.format_message(triage)
+        if self.settings.dry_run:
+            print(message)
+            return
+        self._check_reachable()
         payload = {
             "message": message,
             "number": self.sender,

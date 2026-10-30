@@ -7,6 +7,7 @@ via the Gmail API.
 from __future__ import annotations
 
 import base64
+import logging
 from typing import Any
 
 from google.oauth2.credentials import Credentials
@@ -16,14 +17,17 @@ from googleapiclient.discovery import build
 
 from config import Settings
 
+logger = logging.getLogger(__name__)
+
 SCOPES = ["https://www.googleapis.com/auth/gmail.readonly"]
 
 
 class GmailProvider:
     """Fetches unread emails from Gmail using the Google API."""
 
-    def __init__(self, service: Any) -> None:
+    def __init__(self, service: Any, max_emails: int | None = None) -> None:
         self.service = service
+        self.max_emails = max_emails
 
     @classmethod
     def from_service(cls, service: Any) -> "GmailProvider":
@@ -62,7 +66,7 @@ class GmailProvider:
             token_path.write_text(creds.to_json())
 
         service = build("gmail", "v1", credentials=creds)
-        return cls(service)
+        return cls(service, max_emails=settings.gmail_max_emails)
 
     # ------------------------------------------------------------------
     # Public API
@@ -85,6 +89,13 @@ class GmailProvider:
         )
 
         message_refs = results.get("messages", [])
+        if self.max_emails is not None and len(message_refs) > self.max_emails:
+            logger.warning(
+                "Fetching only %d of %d unread email(s) (limit reached).",
+                self.max_emails,
+                len(message_refs),
+            )
+            message_refs = message_refs[: self.max_emails]
         emails = []
         for ref in message_refs:
             msg = (

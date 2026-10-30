@@ -6,6 +6,7 @@ are mocked so the test suite requires no real credentials or running services.
 
 from __future__ import annotations
 
+import sys
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -141,6 +142,8 @@ class TestMainBlockErrorHandling:
         """A missing env var causes SystemExit(1) via the real __main__ handler."""
         import runpy
 
+        monkeypatch.setattr("dotenv.load_dotenv", lambda *a, **k: False)
+        monkeypatch.setattr(sys, "argv", ["main.py"])
         monkeypatch.delenv("SIGNAL_SENDER_NUMBER", raising=False)
         monkeypatch.delenv("SIGNAL_RECIPIENT_NUMBER", raising=False)
 
@@ -154,6 +157,8 @@ class TestMainBlockErrorHandling:
         import runpy
         import provider_gmail
 
+        monkeypatch.setattr("dotenv.load_dotenv", lambda *a, **k: False)
+        monkeypatch.setattr(sys, "argv", ["main.py"])
         monkeypatch.setenv("SIGNAL_SENDER_NUMBER", "+10000000001")
         monkeypatch.setenv("SIGNAL_RECIPIENT_NUMBER", "+10000000002")
         monkeypatch.setattr(
@@ -166,3 +171,79 @@ class TestMainBlockErrorHandling:
             runpy.run_module("main", run_name="__main__", alter_sys=True)
 
         assert exc_info.value.code == 1
+
+
+# ---------------------------------------------------------------------------
+# Tests: command-line flags (preview mode)
+# ---------------------------------------------------------------------------
+
+class TestCliFlags:
+    def test_defaults(self):
+        import main
+
+        args = main.parse_args([])
+
+        assert args.dry_run is False
+        assert args.limit is None
+        assert args.verbose is False
+
+    def test_all_flags_parse(self):
+        import main
+
+        args = main.parse_args(["--dry-run", "--limit", "5", "--verbose"])
+
+        assert args.dry_run is True
+        assert args.limit == 5
+        assert args.verbose is True
+
+    @pytest.mark.parametrize("bad", [["--limit", "0"], ["--limit", "-3"], ["--limit", "x"]])
+    def test_bad_limit_rejected(self, bad):
+        import main
+
+        with pytest.raises(SystemExit) as exc_info:
+            main.parse_args(bad)
+
+        assert exc_info.value.code == 2
+
+    def test_apply_args_sets_dry_run_and_limit(self):
+        import main
+
+        settings = _settings()
+        result = main.apply_args(settings, main.parse_args(["--dry-run", "--limit", "7"]))
+
+        assert result.dry_run is True
+        assert result.gmail_max_emails == 7
+
+    def test_apply_args_without_flags_leaves_settings_unchanged(self):
+        import main
+
+        settings = _settings()
+
+        assert main.apply_args(settings, main.parse_args([])) == settings
+
+
+# ---------------------------------------------------------------------------
+# Tests: --dry-run end to end
+# ---------------------------------------------------------------------------
+
+class TestDryRunEndToEnd:
+    def test_dry_run_prints_briefing_and_never_calls_signal(self, requests_mock, capsys):
+        """Real notifier + processor, mocked HTTP: only Ollama may be contacted."""
+        import json
+
+        import main
+
+        requests_mock.post(
+            "http://localhost:11434/api/generate",
+            json={"response": json.dumps({"urgent": ["Reply to recruiter"], "tasks": [], "digest": []})},
+        )
+        settings = _settings(dry_run=True)
+
+        with patch("main.GmailProvider") as mock_gmail_cls:
+            mock_gmail_cls.from_credentials.return_value.fetch_unread_emails.return_value = _sample_emails()
+            main.run(settings)
+
+        assert "Reply to recruiter" in capsys.readouterr().out
+        assert [r.hostname + ":" + str(r.port) for r in requests_mock.request_history] == [
+            "localhost:11434"
+        ]
