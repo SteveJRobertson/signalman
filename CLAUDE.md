@@ -50,6 +50,7 @@ Things that are easy to get wrong:
 - **LLM output is untrusted in shape, not just content.** `processor_ai._normalise_list()` coerces whatever the model returns (bare string, `None`, int, tuple) into `list[str]`. Keep new LLM-derived fields going through it. Prompt injection from email bodies is a documented, accepted risk for this local personal tool — the mitigation is that everything is stringified.
 - **`SignalNotifier.send()` probes `GET /v1/about` first** and raises `ConnectionError` if the container is down, before `POST /v2/send`. Both calls must be mocked in tests. With `settings.dry_run` it prints the message and returns before either call.
 - **Gmail OAuth is headless.** `flow.run_local_server(open_browser=False)` on a fixed port (`GMAIL_OAUTH_PORT`, default 8085) so the flow works over SSH; the redirect URI must match in the Google Cloud console.
+- **`GmailProvider.fetch_unread_emails()` pages through `messages.list` (100 per page) up to `gmail_max_emails`, then fetches in batches of 50 via `new_batch_http_request()`.** Batch callbacks fire in arbitrary order, so results are re-sorted to listing order; a failed message lands in `provider.failed_ids` and is skipped. Tests use the `FakeBatch` helper in `tests/test_provider_gmail.py` — a bare `MagicMock` service returns no emails.
 - `GmailProvider._extract_body()` recurses through nested multipart payloads and returns the first `text/plain` part it finds.
 
 ## Conventions

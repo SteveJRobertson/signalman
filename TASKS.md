@@ -11,7 +11,7 @@ Test tasks are listed separately from implementation on purpose — they are the
 | 0a · Reconcile the environment | 4 | ✅ Done |
 | 0b · Settings object | 13 | ✅ Done |
 | 0c · Preview mode | 6 | ✅ Done |
-| 1 · Read the whole inbox | 10 | ⬜ Not started |
+| 1 · Read the whole inbox | 10 | ✅ Done |
 | 2 · Understand every email | 9 | ⬜ Not started |
 | 3 · Strip the clutter | 12 | ⬜ Not started |
 | 4 · Bound input, new contract | 12 | ⬜ Not started |
@@ -88,23 +88,27 @@ Also done in this phase: the `GmailProvider` now takes `max_emails` (from `Setti
 
 ---
 
-## Phase 1 · Read the whole inbox
+## Phase 1 · Read the whole inbox ✅
 
 ### Implementation · `provider_gmail.py`
 
-- [ ] **Paginate on `nextPageToken`** — currently read once and discarded, so everything past the first 100 is invisible · `M`
-- [ ] **Apply `gmail_max_emails` cap** · `S`
-- [ ] **Warn when the cap truncates** — a cap that hides its own effect recreates the bug being fixed · `S`
-- [ ] **Batch the message fetches** — `new_batch_http_request()`, chunks of 50, replacing 101 round trips with ~3 · `L`
-- [ ] **Isolate per-message failures** — record the id, continue; one malformed message must not abort the run · `M`
-- [ ] **Re-sort to original id order** — batch callbacks fire arbitrarily; output must be deterministic · `S`
+- [x] **Paginate on `nextPageToken`** — currently read once and discarded, so everything past the first 100 is invisible · `M`
+- [x] **Apply `gmail_max_emails` cap** · `S`
+- [x] **Warn when the cap truncates** — a cap that hides its own effect recreates the bug being fixed · `S`
+- [x] **Batch the message fetches** — `new_batch_http_request()`, chunks of 50, replacing 101 round trips with ~3 · `L`
+- [x] **Isolate per-message failures** — record the id, continue; one malformed message must not abort the run · `M`
+- [x] **Re-sort to original id order** — batch callbacks fire arbitrarily; output must be deterministic · `S`
 
 ### Tests
 
-- [ ] **Pagination across two and three pages** · `M`
-- [ ] **Cap enforced and warning logged** · `S`
-- [ ] **Batch assembles correctly regardless of callback order** · `M`
-- [ ] **One failed message does not lose the other 49** · `S`
+- [x] **Pagination across two and three pages** · `M`
+- [x] **Cap enforced and warning logged** · `S`
+- [x] **Batch assembles correctly regardless of callback order** · `M`
+- [x] **One failed message does not lose the other 49** · `S`
+
+---
+
+Also done in this phase: `GMAIL_MAX_EMAILS` is now read by `Settings.from_env()` (it existed on the dataclass but could never be set; values below 1 are rejected), and documented in the three env tables. `GmailProvider.failed_ids` records any message that could not be fetched or parsed.
 
 ---
 
