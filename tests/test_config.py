@@ -147,6 +147,35 @@ class TestGmailMaxEmails:
             Settings.from_env()
 
 
+class TestMaxBodyChars:
+    def test_default(self, monkeypatch):
+        _set_required(monkeypatch)
+        monkeypatch.delenv("MAX_BODY_CHARS", raising=False)
+
+        assert Settings.from_env().max_body_chars == 6000
+
+    def test_custom_value(self, monkeypatch):
+        _set_required(monkeypatch)
+        monkeypatch.setenv("MAX_BODY_CHARS", "1500")
+
+        assert Settings.from_env().max_body_chars == 1500
+
+    def test_non_numeric_names_the_variable(self, monkeypatch):
+        _set_required(monkeypatch)
+        monkeypatch.setenv("MAX_BODY_CHARS", "big")
+
+        with pytest.raises(ValueError, match="MAX_BODY_CHARS"):
+            Settings.from_env()
+
+    @pytest.mark.parametrize("bad", ["0", "-1"])
+    def test_below_one_rejected(self, monkeypatch, bad):
+        _set_required(monkeypatch)
+        monkeypatch.setenv("MAX_BODY_CHARS", bad)
+
+        with pytest.raises(ValueError, match="MAX_BODY_CHARS"):
+            Settings.from_env()
+
+
 # ---------------------------------------------------------------------------
 # Tests: OLLAMA_URL guard
 # ---------------------------------------------------------------------------

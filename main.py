@@ -23,6 +23,7 @@ import sys
 
 from dotenv import load_dotenv
 
+from cleaner import clean
 from config import Settings
 from notifier_signal import SignalNotifier
 from processor_ai import AIProcessor
@@ -81,6 +82,11 @@ def run(settings: Settings) -> None:
     provider = GmailProvider.from_credentials(settings)
     emails = provider.fetch_unread_emails()
     logger.info("Fetched %d email(s).", len(emails))
+
+    emails = [
+        {**email, "body": clean(email["body"], max_chars=settings.max_body_chars)}
+        for email in emails
+    ]
 
     logger.info("Triaging emails with AI processor…")
     processor = AIProcessor(settings)
