@@ -3,6 +3,7 @@ google-api-python-client
 google-auth-oauthlib
 google-auth-httplib2
 python-dotenv
+html2text
 requests
 
 # Dev / test dependencies

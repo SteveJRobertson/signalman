@@ -8,8 +8,10 @@ from __future__ import annotations
 
 import base64
 import logging
+import re
 from typing import Any
 
+import html2text
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
 from google.auth.transport.requests import Request
@@ -21,6 +23,7 @@ logger = logging.getLogger(__name__)
 
 _QUERY = "is:unread newer_than:1d"
 _PAGE_SIZE = 100  # Gmail's maximum for messages.list
+_TEXT_TYPES = ("text/plain", "text/html")
 _BATCH_SIZE = 50  # messages fetched per batch request
 
 SCOPES = ["https://www.googleapis.com/auth/gmail.readonly"]
@@ -84,7 +87,7 @@ class GmailProvider:
             - ``id``      : Gmail message ID
             - ``subject`` : Email subject (empty string if missing)
             - ``sender``  : From header value (empty string if missing)
-            - ``body``    : Plain-text body (empty string if missing)
+            - ``body``    : Body as text — plain if available, else converted HTML (empty string if missing)
         """
         message_ids = self._list_unread_ids()
         emails_by_id: dict[str, dict] = {}
@@ -194,27 +197,58 @@ class GmailProvider:
 
     @staticmethod
     def _extract_body(payload: dict) -> str:
-        """Decode the plain-text body from a message payload.
+        """Return the message body as text suitable for an LLM.
 
-        Handles simple (``text/plain``), single-level multipart, and deeply
-        nested multipart messages (e.g. multipart/mixed > multipart/alternative
-        > text/plain) by recursing into sub-parts.
+        Walks the payload tree (simple, multipart, or arbitrarily nested
+        multipart) collecting the first non-blank ``text/plain`` and the
+        first non-blank ``text/html`` part. Plain text wins; HTML (most
+        newsletters, receipts and marketing mail) is converted to text only
+        when there is no usable plain part. Returns ``""`` if neither exists.
         """
-        mime_type = payload.get("mimeType", "")
-
-        if mime_type == "text/plain":
-            data = payload.get("body", {}).get("data", "")
-            return _decode_base64(data) if data else ""
-
-        # Multipart: recurse into each part, return the first text/plain found.
-        for part in payload.get("parts", []):
-            result = GmailProvider._extract_body(part)
-            if result:
-                return result
-
+        found: dict[str, str] = {}
+        GmailProvider._collect_text_parts(payload, found)
+        if "text/plain" in found:
+            return found["text/plain"]
+        if "text/html" in found:
+            return _html_to_text(found["text/html"])
         return ""
+
+    @staticmethod
+    def _collect_text_parts(payload: dict, found: dict[str, str]) -> None:
+        """Record the first non-blank decoded part of each text type in *found*."""
+        mime_type = payload.get("mimeType", "")
+        if mime_type in _TEXT_TYPES and mime_type not in found:
+            data = payload.get("body", {}).get("data", "")
+            text = _decode_base64(data) if data else ""
+            if text.strip():
+                found[mime_type] = text
+
+        for part in payload.get("parts", []):
+            GmailProvider._collect_text_parts(part, found)
 
 
 def _decode_base64(data: str) -> str:
     """Decode a URL-safe base64-encoded string returned by the Gmail API."""
     return base64.urlsafe_b64decode(data.encode()).decode("utf-8", errors="replace")
+
+
+def _html_to_text(html: str) -> str:
+    """Convert HTML to compact plain text for LLM consumption.
+
+    Images and links are dropped (alt text and URLs are noise that burns
+    tokens), lines are not hard-wrapped, table scaffolding lines are removed
+    and the runs of blank lines that table-based newsletter markup produces
+    are collapsed.
+    """
+    converter = html2text.HTML2Text()
+    converter.ignore_images = True
+    converter.ignore_links = True
+    converter.ignore_emphasis = True
+    converter.body_width = 0
+    text = converter.handle(html)
+    text = re.sub(r"[ \t]+\n", "\n", text)
+    # Drop lines that are only table/rule scaffolding (e.g. "---", "|",
+    # "---|---"). Layout tables emit these by the dozen; real data tables
+    # keep their "a | b" rows.
+    text = re.sub(r"^[ \t|:-]+$", "", text, flags=re.MULTILINE)
+    return re.sub(r"\n{3,}", "\n\n", text).strip()
