@@ -529,3 +529,157 @@ class TestBatchedFetch:
 
         assert [e["id"] for e in result] == ["m0", "m2"]
         assert provider.failed_ids == ["m1"]
+
+
+# ---------------------------------------------------------------------------
+# Tests: HTML bodies (Phase 2)
+# ---------------------------------------------------------------------------
+
+def _b64(text: str) -> str:
+    return base64.urlsafe_b64encode(text.encode()).decode()
+
+
+def _part(mime: str, text: str = "") -> dict:
+    return {"mimeType": mime, "body": {"data": _b64(text)} if text else {}}
+
+
+def _multipart(mime: str, *parts: dict) -> dict:
+    return {"mimeType": mime, "body": {}, "parts": list(parts)}
+
+
+# A table-based marketing email: nested layout tables, spacer rows and
+# &nbsp; padding that, naively converted, produce screens of blank lines.
+_NEWSLETTER_HTML = """
+<html><head><style>td { padding: 0 }</style></head><body>
+<table width="600"><tr><td>&nbsp;</td></tr><tr><td>&nbsp;</td></tr>
+<tr><td><table><tr><td><img src="logo.png" alt="ACME logo"></td></tr></table></td></tr>
+<tr><td>&nbsp;</td></tr><tr><td>&nbsp;</td></tr><tr><td>&nbsp;</td></tr>
+<tr><td><h1>Your October statement is ready</h1></td></tr>
+<tr><td>&nbsp;</td></tr><tr><td>&nbsp;</td></tr><tr><td>&nbsp;</td></tr><tr><td>&nbsp;</td></tr>
+<tr><td><p>Balance due: <strong>&pound;42.00</strong> by <em>15 November</em>.</p></td></tr>
+<tr><td>&nbsp;</td></tr><tr><td>&nbsp;</td></tr><tr><td>&nbsp;</td></tr>
+<tr><td><a href="https://example.com/pay?token=abcdef">Pay now</a></td></tr>
+</table></body></html>
+"""
+
+
+class TestHtmlBodies:
+    def test_html_only_message_yields_non_empty_text(self):
+        payload = _part("text/html", "<p>Your <b>parcel</b> has shipped.</p>")
+
+        body = GmailProvider._extract_body(payload)
+
+        assert "Your parcel has shipped." in body
+        assert "<" not in body
+
+    def test_plain_text_wins_when_both_parts_exist(self):
+        payload = _multipart(
+            "multipart/alternative",
+            _part("text/plain", "plain version"),
+            _part("text/html", "<p>html version</p>"),
+        )
+
+        assert GmailProvider._extract_body(payload) == "plain version"
+
+    def test_plain_text_wins_even_when_html_comes_first(self):
+        payload = _multipart(
+            "multipart/alternative",
+            _part("text/html", "<p>html version</p>"),
+            _part("text/plain", "plain version"),
+        )
+
+        assert GmailProvider._extract_body(payload) == "plain version"
+
+    def test_html_nested_deep_in_multipart(self):
+        payload = _multipart(
+            "multipart/mixed",
+            _multipart(
+                "multipart/related",
+                _multipart("multipart/alternative", _part("text/html", "<p>deep <i>html</i></p>")),
+                {"mimeType": "image/png", "body": {"attachmentId": "abc"}},
+            ),
+        )
+
+        assert GmailProvider._extract_body(payload) == "deep html"
+
+    def test_whitespace_only_plain_part_falls_through_to_html(self):
+        payload = _multipart(
+            "multipart/alternative",
+            _part("text/plain", " \n\t \n"),
+            _part("text/html", "<p>the real content</p>"),
+        )
+
+        assert GmailProvider._extract_body(payload) == "the real content"
+
+    def test_plain_part_returned_unmodified(self):
+        """Plain text is not stripped or reflowed; cleaning is a later phase."""
+        payload = _part("text/plain", "  hello\n\n\n\nworld\n")
+
+        assert GmailProvider._extract_body(payload) == "  hello\n\n\n\nworld\n"
+
+    def test_no_text_parts_returns_empty_string(self):
+        payload = _multipart("multipart/mixed", {"mimeType": "application/pdf", "body": {}})
+
+        assert GmailProvider._extract_body(payload) == ""
+
+    def test_empty_html_returns_empty_string(self):
+        assert GmailProvider._extract_body(_part("text/html", "<div> </div>")) == ""
+
+    def test_images_links_and_emphasis_are_dropped(self):
+        payload = _part(
+            "text/html",
+            '<p>See <a href="https://example.com/x?t=1">the report</a> '
+            '<img src="a.png" alt="chart"> <strong>now</strong></p>',
+        )
+
+        body = GmailProvider._extract_body(payload)
+
+        assert body == "See the report now"
+
+    def test_long_lines_are_not_hard_wrapped(self):
+        sentence = "word " * 100
+        body = GmailProvider._extract_body(_part("text/html", f"<p>{sentence}</p>"))
+
+        assert "\n" not in body
+
+    def test_newsletter_has_content_but_no_runaway_blank_lines(self):
+        body = GmailProvider._extract_body(_part("text/html", _NEWSLETTER_HTML))
+
+        assert "Your October statement is ready" in body
+        assert "42.00" in body and "15 November" in body
+        assert "Pay now" in body
+        assert "https://" not in body and "ACME logo" not in body
+        assert "\n\n\n" not in body
+        assert body == body.strip()
+        # no leftover markdown-table scaffolding from the layout tables
+        assert not any(set(line) <= set("|-: ") for line in body.splitlines() if line)
+
+    def test_data_table_rows_stay_readable(self):
+        html = (
+            "<table><tr><th>Item</th><th>Price</th></tr>"
+            "<tr><td>Milk</td><td>&pound;1</td></tr></table>"
+        )
+
+        body = GmailProvider._extract_body(_part("text/html", html))
+
+        assert "Item" in body and "Price" in body
+        assert "Milk" in body and "£1" in body
+        assert "Milk" not in body.split("Price")[0]  # cells not run together
+
+    def test_html_only_message_end_to_end_through_fetch(self):
+        msg = {
+            "id": "html1",
+            "payload": {
+                "headers": [
+                    {"name": "Subject", "value": "Statement"},
+                    {"name": "From", "value": "billing@acme.example"},
+                ],
+                **_part("text/html", _NEWSLETTER_HTML),
+            },
+        }
+        service = _build_mock_service({"messages": [{"id": "html1"}]}, [msg])
+
+        result = GmailProvider.from_service(service).fetch_unread_emails()
+
+        assert len(result) == 1
+        assert "Balance due" in result[0]["body"]

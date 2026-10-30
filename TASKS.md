@@ -12,7 +12,7 @@ Test tasks are listed separately from implementation on purpose — they are the
 | 0b · Settings object | 13 | ✅ Done |
 | 0c · Preview mode | 6 | ✅ Done |
 | 1 · Read the whole inbox | 10 | ✅ Done |
-| 2 · Understand every email | 9 | ⬜ Not started |
+| 2 · Understand every email | 9 | ✅ Done |
 | 3 · Strip the clutter | 12 | ⬜ Not started |
 | 4 · Bound input, new contract | 12 | ⬜ Not started |
 | 5 · Constrain AI output | 12 | ⬜ Not started |
@@ -112,24 +112,28 @@ Also done in this phase: `GMAIL_MAX_EMAILS` is now read by `Settings.from_env()`
 
 ---
 
-## Phase 2 · Understand every email
+## Phase 2 · Understand every email ✅
 
 ### Implementation · `provider_gmail.py`
 
-- [ ] **Add `html2text`** to `requirements.txt` · `S`
-- [ ] **Restructure `_extract_body`** — collect both the first `text/plain` and first `text/html` while walking the tree · `M`
-- [ ] **Prefer plain, fall back to HTML** — return plain if non-empty after stripping, else converted HTML · `S`
-- [ ] **Configure `html2text` for a model, not a human** — `ignore_images`, `ignore_links`, `body_width=0`, `ignore_emphasis` · `S`
-- [ ] **Collapse excess blank lines** — table-based newsletter markup produces enormous vertical whitespace · `S`
+- [x] **Add `html2text`** to `requirements.txt` · `S`
+- [x] **Restructure `_extract_body`** — collect both the first `text/plain` and first `text/html` while walking the tree · `M`
+- [x] **Prefer plain, fall back to HTML** — return plain if non-empty after stripping, else converted HTML · `S`
+- [x] **Configure `html2text` for a model, not a human** — `ignore_images`, `ignore_links`, `body_width=0`, `ignore_emphasis` · `S`
+- [x] **Collapse excess blank lines** — table-based newsletter markup produces enormous vertical whitespace · `S`
 
 ### Tests
 
 The current suite has **no HTML-only case** — both tests mentioning `text/html` give it a `text/plain` sibling, which is why this gap stayed invisible.
 
-- [ ] **HTML-only message yields non-empty text** · `S`
-- [ ] **Plain text still wins when both parts exist** · `S`
-- [ ] **Nested multipart with HTML only at depth** · `S`
-- [ ] **Whitespace-only plain part falls through to HTML** · `S`
+- [x] **HTML-only message yields non-empty text** · `S`
+- [x] **Plain text still wins when both parts exist** · `S`
+- [x] **Nested multipart with HTML only at depth** · `S`
+- [x] **Whitespace-only plain part falls through to HTML** · `S`
+
+---
+
+Also done in this phase: after the first real conversion, layout tables left `---` / `|` scaffolding lines in the output. `ignore_tables` fixed that but glued data-table cells together (`ItemPrice`), so scaffolding-only lines are stripped after conversion instead, which keeps `Item| Price` rows readable. The first non-blank part of each type is used (not merely the first part), so an empty or whitespace-only `text/plain` stub no longer shadows a real HTML body.
 
 ---
 
