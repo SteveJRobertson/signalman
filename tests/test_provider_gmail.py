@@ -6,10 +6,14 @@ All Gmail API calls are mocked so no real credentials are required.
 from __future__ import annotations
 
 import base64
+import logging
+import stat
 from unittest.mock import MagicMock, patch
 
 import pytest
+from google_auth_oauthlib.flow import _WSGIRequestHandler
 
+from config import Settings
 from provider_gmail import GmailProvider
 
 
@@ -683,3 +687,77 @@ class TestHtmlBodies:
 
         assert len(result) == 1
         assert "Balance due" in result[0]["body"]
+
+
+# ---------------------------------------------------------------------------
+# Tests: token file permissions
+# ---------------------------------------------------------------------------
+
+def _token_settings(tmp_path) -> Settings:
+    return Settings(
+        signal_sender="+10000000001",
+        signal_recipient="+10000000002",
+        gmail_credentials_path=tmp_path / "credentials.json",
+        gmail_token_path=tmp_path / "token.json",
+    )
+
+
+def _mode(path) -> int:
+    return stat.S_IMODE(path.stat().st_mode)
+
+
+class TestTokenFile:
+    def test_token_from_consent_flow_is_owner_only(self, tmp_path):
+        settings = _token_settings(tmp_path)
+        creds = MagicMock()
+        creds.to_json.return_value = '{"token": "new"}'
+
+        with (
+            patch("provider_gmail.InstalledAppFlow") as flow_cls,
+            patch("provider_gmail.build"),
+        ):
+            flow_cls.from_client_secrets_file.return_value.run_local_server.return_value = creds
+            GmailProvider.from_credentials(settings)
+
+        assert settings.gmail_token_path.read_text() == '{"token": "new"}'
+        assert _mode(settings.gmail_token_path) == 0o600
+
+    def test_refresh_tightens_a_token_file_that_was_world_readable(self, tmp_path):
+        settings = _token_settings(tmp_path)
+        settings.gmail_token_path.write_text('{"token": "a much longer old value"}')
+        settings.gmail_token_path.chmod(0o644)
+        creds = MagicMock(valid=False, expired=True, refresh_token="r")
+        creds.to_json.return_value = '{"token": "new"}'
+
+        with (
+            patch("provider_gmail.Credentials") as creds_cls,
+            patch("provider_gmail.Request"),
+            patch("provider_gmail.build"),
+        ):
+            creds_cls.from_authorized_user_file.return_value = creds
+            GmailProvider.from_credentials(settings)
+
+        creds.refresh.assert_called_once()
+        assert settings.gmail_token_path.read_text() == '{"token": "new"}'
+        assert _mode(settings.gmail_token_path) == 0o600
+
+
+# ---------------------------------------------------------------------------
+# Tests: consent flow logging
+# ---------------------------------------------------------------------------
+
+class TestConsentLogging:
+    def test_redirect_request_line_with_auth_code_is_not_logged(self, caplog):
+        with caplog.at_level("INFO", logger="google_auth_oauthlib.flow"):
+            _WSGIRequestHandler.log_message(
+                MagicMock(), '"%s" %s %s', "GET /?state=s&code=SECRET HTTP/1.1", "200", "-"
+            )
+
+        assert "SECRET" not in caplog.text
+
+    def test_consent_url_is_still_logged(self, caplog):
+        """Piped output buffers the printed URL, so this log line is what the user sees."""
+        with caplog.at_level("INFO", logger="google_auth_oauthlib.flow"):
+            logging.getLogger("google_auth_oauthlib.flow").info("Please visit this URL: https://x")
+
+        assert "Please visit this URL" in caplog.text

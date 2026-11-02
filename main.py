@@ -37,6 +37,15 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+# Never the root logger: at DEBUG, Google's auth libraries log OAuth tokens.
+_VERBOSE_LOGGERS = (__name__, "provider_gmail", "processor_ai")
+
+
+def enable_verbose_logging() -> None:
+    """Turn on DEBUG for Signalman's own loggers, leaving third-party ones alone."""
+    for name in _VERBOSE_LOGGERS:
+        logging.getLogger(name).setLevel(logging.DEBUG)
+
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     """Parse command-line flags for preview mode."""
@@ -100,16 +109,16 @@ def run(settings: Settings) -> None:
         len(result.failed_ids),
     )
 
-    logger.info("Sending Signal briefing…")
+    logger.info("Printing briefing (dry run)…" if settings.dry_run else "Sending Signal briefing…")
     notifier = SignalNotifier(settings)
     notifier.send(result)
-    logger.info("Briefing sent successfully.")
+    logger.info("Dry run complete; nothing sent." if settings.dry_run else "Briefing sent successfully.")
 
 
 if __name__ == "__main__":
     args = parse_args()
     if args.verbose:
-        logging.getLogger().setLevel(logging.DEBUG)
+        enable_verbose_logging()
     try:
         run(apply_args(Settings.from_env(), args))
     except KeyError as exc:

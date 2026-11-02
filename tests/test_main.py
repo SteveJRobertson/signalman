@@ -6,6 +6,7 @@ are mocked so the test suite requires no real credentials or running services.
 
 from __future__ import annotations
 
+import logging
 import sys
 from unittest.mock import MagicMock, patch
 
@@ -349,3 +350,98 @@ class TestDryRunEndToEnd:
         out = capsys.readouterr().out
         assert "Pills for cheap" not in out
         assert "All clear" in out
+
+
+# ---------------------------------------------------------------------------
+# Tests: end-of-run log messages
+# ---------------------------------------------------------------------------
+
+class TestCompletionLogging:
+    def _log_of_run(self, caplog, settings) -> str:
+        import main
+
+        processor = MagicMock()
+        processor.triage.return_value = TriageResult()
+        with (
+            patch("main.GmailProvider"),
+            patch("main.AIProcessor", return_value=processor),
+            patch("main.SignalNotifier"),
+            caplog.at_level("INFO", logger="main"),
+        ):
+            main.run(settings)
+        return caplog.text
+
+    def test_real_run_reports_the_briefing_as_sent(self, caplog):
+        assert "Briefing sent successfully." in self._log_of_run(caplog, _settings())
+
+    def test_dry_run_does_not_claim_anything_was_sent(self, caplog):
+        text = self._log_of_run(caplog, _settings(dry_run=True))
+
+        assert "Sending Signal briefing" not in text
+        assert "sent successfully" not in text
+        assert "nothing sent" in text
+
+
+# ---------------------------------------------------------------------------
+# Tests: --verbose must not expose third-party DEBUG logging
+# ---------------------------------------------------------------------------
+
+_OWN_LOGGERS = ("__main__", "main", "provider_gmail", "processor_ai")
+_THIRD_PARTY_LOGGERS = (
+    "oauthlib.oauth2",
+    "requests_oauthlib.oauth2_session",
+    "google_auth_oauthlib.flow",
+    "google.auth",
+    "googleapiclient.discovery",
+    "urllib3.connectionpool",
+)
+
+
+@pytest.fixture
+def restore_log_levels():
+    loggers = [logging.getLogger(n) for n in (*_OWN_LOGGERS, *_THIRD_PARTY_LOGGERS)]
+    loggers.append(logging.getLogger())
+    levels = [lg.level for lg in loggers]
+    yield
+    for lg, level in zip(loggers, levels):
+        lg.setLevel(level)
+
+
+@pytest.mark.usefixtures("restore_log_levels")
+class TestVerboseLogging:
+    @pytest.mark.parametrize("name", ["main", "provider_gmail", "processor_ai"])
+    def test_own_loggers_emit_debug(self, name):
+        import main
+
+        main.enable_verbose_logging()
+
+        assert logging.getLogger(name).isEnabledFor(logging.DEBUG)
+
+    @pytest.mark.parametrize("name", _THIRD_PARTY_LOGGERS)
+    def test_third_party_loggers_stay_quiet(self, name):
+        import main
+
+        main.enable_verbose_logging()
+
+        assert not logging.getLogger(name).isEnabledFor(logging.DEBUG)
+
+    def test_verbose_flag_is_wired_up_without_touching_the_root_logger(self, monkeypatch):
+        """Run the real __main__ block, so the flag's handling itself is covered."""
+        import runpy
+        import provider_gmail
+
+        monkeypatch.setattr("dotenv.load_dotenv", lambda *a, **k: False)
+        monkeypatch.setattr(sys, "argv", ["main.py", "--verbose"])
+        monkeypatch.setenv("SIGNAL_SENDER_NUMBER", "+10000000001")
+        monkeypatch.setenv("SIGNAL_RECIPIENT_NUMBER", "+10000000002")
+        monkeypatch.setattr(
+            provider_gmail.GmailProvider,
+            "from_credentials",
+            MagicMock(side_effect=RuntimeError("stop here")),
+        )
+
+        with pytest.raises(SystemExit):
+            runpy.run_module("main", run_name="__main__", alter_sys=True)
+
+        assert logging.getLogger("processor_ai").isEnabledFor(logging.DEBUG)
+        assert not logging.getLogger("oauthlib.oauth2").isEnabledFor(logging.DEBUG)

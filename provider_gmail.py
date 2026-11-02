@@ -8,7 +8,9 @@ from __future__ import annotations
 
 import base64
 import logging
+import os
 import re
+from pathlib import Path
 from typing import Any
 
 import html2text
@@ -27,6 +29,28 @@ _TEXT_TYPES = ("text/plain", "text/html")
 _BATCH_SIZE = 50  # messages fetched per batch request
 
 SCOPES = ["https://www.googleapis.com/auth/gmail.readonly"]
+
+
+class _DropConsentRedirect(logging.Filter):
+    """Hide the consent redirect's request line, which contains the OAuth code.
+
+    The same logger also emits the consent URL, which has to stay: the printed
+    copy is held back by stdout buffering when output is piped.
+    """
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        return record.funcName != "log_message"
+
+
+logging.getLogger("google_auth_oauthlib.flow").addFilter(_DropConsentRedirect())
+
+
+def _save_token(token_path: Path, token_json: str) -> None:
+    """Write the OAuth token so that only the owner can read it."""
+    fd = os.open(token_path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w", encoding="utf-8") as handle:
+        os.fchmod(fd, 0o600)  # os.open's mode only applies to a newly created file
+        handle.write(token_json)
 
 
 class GmailProvider:
@@ -71,7 +95,7 @@ class GmailProvider:
                     port=settings.gmail_oauth_port,
                     open_browser=False,
                 )
-            token_path.write_text(creds.to_json())
+            _save_token(token_path, creds.to_json())
 
         service = build("gmail", "v1", credentials=creds)
         return cls(service, max_emails=settings.gmail_max_emails)

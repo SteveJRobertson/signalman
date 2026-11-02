@@ -71,7 +71,7 @@ On first run the consent flow starts a local listener on `GMAIL_OAUTH_PORT` (def
 
 Add `http://127.0.0.1:8085/` to the **Authorised redirect URIs** of your OAuth client in the Google Cloud console. If you change `GMAIL_OAUTH_PORT`, change the redirect URI to match.
 
-> `credentials.json` and `token.json` are gitignored. `token.json` is a long-lived key to your Gmail account — never commit it, and revoke it at [myaccount.google.com/permissions](https://myaccount.google.com/permissions) if it is ever exposed.
+> `credentials.json` and `token.json` are gitignored. `token.json` is a long-lived key to your Gmail account, saved readable only by your user — never commit it, and revoke it at [myaccount.google.com/permissions](https://myaccount.google.com/permissions) if it is ever exposed.
 
 ---
 
@@ -136,6 +136,8 @@ To see the briefing without messaging your phone — for example while tuning th
 ```bash
 python3 main.py --dry-run --limit 10 --verbose
 ```
+
+`--verbose` applies to Signalman's own modules only, so it does not log OAuth tokens, but its output does include the content of your emails. Treat any saved copy as private.
 
 ---
 

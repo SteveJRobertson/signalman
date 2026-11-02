@@ -86,3 +86,4 @@ Gmail API → provider_gmail.py → processor_ai.py (Ollama) → notifier_signal
 - Validate all external inputs at system boundaries
 - Follow OWASP Top 10 guidelines
 - Never log credentials, tokens, or phone numbers
+- Never raise the root logger to DEBUG: Google's auth libraries log OAuth tokens at that level. `--verbose` raises only `main._VERBOSE_LOGGERS`, so add any new module with a logger there
