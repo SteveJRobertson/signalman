@@ -22,6 +22,8 @@ python3 main.py --dry-run --limit 5 --verbose   # preview: prints the briefing, 
 
 There is no linter or formatter configured, and no `pyproject.toml`/`setup.py`/`conftest.py`. Modules are flat top-level imports, so **pytest must be run from the repo root** — `tests/test_main.py` does `import main` and `runpy.run_module("main")`.
 
+**Any test that runs `main.py`'s `__main__` block via `runpy` must patch `sys.argv` first** (`monkeypatch.setattr(sys, "argv", ["main.py"])`), since it parses real CLI flags. Otherwise `argparse` reads pytest's own argv and the test fails with `SystemExit(2)` instead of whatever it meant to check. `_arrange_main_block` in `tests/test_main.py` does this for you.
+
 Two live dependencies for a real run: Ollama (`ollama pull llama3`) and the Signal container:
 
 ```bash

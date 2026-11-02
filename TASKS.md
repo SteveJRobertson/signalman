@@ -10,7 +10,7 @@ Test tasks are listed separately from implementation on purpose — they are the
 | 0 · Secure the keys | 4 | ✅ Done |
 | 0a · Reconcile the environment | 4 | ✅ Done |
 | 0b · Settings object | 13 | ✅ Done |
-| 0c · Preview mode | 6 | ✅ Done |
+| 0c · Preview mode | 7 | ✅ Done |
 | 1 · Read the whole inbox | 10 | ✅ Done |
 | 2 · Understand every email | 9 | ✅ Done |
 | 3 · Strip the clutter | 12 | ✅ Done |
@@ -81,6 +81,7 @@ Do this before touching the classification prompt. Without it, every experiment 
 - [x] **`--verbose`** — DEBUG logging including each prompt and raw reply. This is the flag that makes prompt tuning possible · `S`
 - [x] **Test: `--dry-run` issues no HTTP request** — assert against `requests_mock` call count · `S`
 - [x] **Document preview mode** in the README · `S`
+- [x] **(Found during implementation) Fix `runpy` + `argparse` interaction** — the runpy-based `__main__` tests broke once `main.py` parsed real CLI args, because `argparse` read pytest's own `sys.argv`. Fixed by patching `sys.argv`; documented in `CLAUDE.md` so the next new runpy test doesn't rediscover it · `S`
 
 ---
 
