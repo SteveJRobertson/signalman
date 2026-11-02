@@ -16,7 +16,7 @@ Test tasks are listed separately from implementation on purpose — they are the
 | 3 · Strip the clutter | 12 | ✅ Done |
 | 4 · Bound input, new contract | 12 | ✅ Done |
 | 5 · Constrain AI output | 12 | ✅ Done |
-| 6 · Fail loudly | 11 | ⬜ Not started |
+| 6 · Fail loudly | 11 | ✅ Done |
 | 7–9 · Improvement | 21 | ⬜ Outline only |
 
 **Do not reorder 0a → 0b → 0c → 1 → 2 → 3 → 4 → 5 → 6.** The dependency reasoning is in the plan's sequencing section; the short version is that each phase changes the input the next one is sized against. The three 0-phases are groundwork: nothing *depends* on them, but everything *uses* them, which is why they come first rather than last.
@@ -226,24 +226,43 @@ Decisions worth knowing, checked against a real Ollama 0.40.13:
 
 ---
 
-## Phase 6 · Fail loudly
+## Phase 6 · Fail loudly ✅
 
 ### Implementation · `main.py`, `notifier_signal.py`
 
-- [ ] **Readiness gate** — poll Ollama `/api/tags` and Signal `/v1/about`, 6 attempts at 10s. At 08:00 after a restart these are routinely not up yet · `M`
-- [ ] **Verify the configured model exists** — a missing model currently surfaces as an opaque mid-run error · `S`
-- [ ] **Send a Signal alert on failure** — exception type, message, timestamp · `M`
-- [ ] **Handle alert-send failure** — log and exit 1; the heartbeat covers this case · `S`
-- [ ] **Document the heartbeat as intentional** — the daily empty briefing is the safety net. Undocumented, someone will optimise it away · `S`
-- [ ] **Cap the digest at 20 items** — "…and 47 more". Never cap urgent or tasks · `S`
+- [x] **Readiness gate** — poll Ollama `/api/tags` and Signal `/v1/about`, 6 attempts at 10s. At 08:00 after a restart these are routinely not up yet · `M`
+- [x] **Verify the configured model exists** — a missing model currently surfaces as an opaque mid-run error · `S`
+- [x] **Send a Signal alert on failure** — exception type, message, timestamp · `M`
+- [x] **Handle alert-send failure** — log and exit 1; the heartbeat covers this case · `S`
+- [x] **Document the heartbeat as intentional** — the daily empty briefing is the safety net. Undocumented, someone will optimise it away · `S`
+- [x] **Cap the digest at 20 items** — "…and 47 more". Never cap urgent or tasks · `S`
 
 ### Tests
 
-- [ ] **Readiness retries then succeeds** · `M`
-- [ ] **Readiness exhausts and raises** · `S`
-- [ ] **Missing model detected at startup** · `S`
-- [ ] **Failure path sends an alert; alert failure exits 1 without raising** · `M`
-- [ ] **Digest capped, urgent never capped** · `S`
+- [x] **Readiness retries then succeeds** · `M`
+- [x] **Readiness exhausts and raises** · `S`
+- [x] **Missing model detected at startup** · `S`
+- [x] **Failure path sends an alert; alert failure exits 1 without raising** · `M`
+- [x] **Digest capped, urgent never capped** · `S`
+
+---
+
+Also done in this phase, because an unattended run could not report them otherwise:
+
+- **An expired or revoked Gmail token.** `creds.refresh` raising used to end the run with only a line in `signalman.error.log`. It now raises `GmailAuthError`, which becomes an alert saying how to sign in again. A token revoked before its expiry only shows up on first use, in `fetch_unread_emails()`, and is handled the same way. Only Google refusing the token counts: a network failure during refresh stays as it is, because signing in again would not help.
+- **A missing or corrupt `token.json`.** `flow.run_local_server` had no timeout, so the launchd job would have waited forever and told no one. The flow now only starts if `sys.stdin.isatty()`, and otherwise raises `GmailAuthError` at once. At a terminal it has a timeout (`GMAIL_OAUTH_TIMEOUT`), and those same cases, including a rejected refresh, simply start the consent flow, with no need to delete `token.json` first. Checked with a real `run_local_server` under a pty: it gives up on time, and with stdin from `/dev/null` it exits at once.
+- **Gmail refusing mail could read as "All clear".** Phase 1 records per-message fetch failures in `provider.failed_ids`, but only logged them. If Gmail rate-limited a whole inbox, the briefing would have said "All clear", defeating the heartbeat. They now reach the briefing via `TriageResult.fetch_failed_ids`: "⚠️ 2 emails could not be fetched".
+- **`except KeyError` wrapped the whole run**, so a `KeyError` from anywhere was logged as "Missing required environment variable", with no alert possible. Settings now load in their own `try`. A bad value such as `READINESS_ATTEMPTS=lots` is logged as invalid configuration. Neither can send an alert, since there may be no recipient yet, so the missing heartbeat covers them.
+
+Decisions worth knowing:
+
+- **The real `/api/tags` lists `llama3:latest`, while the default setting is `llama3`.** A plain comparison would have failed every morning, so names go through `_with_tag()`. A bare name means `:latest` and nothing else, because that is what Ollama would run: `llama3` is not satisfied by `llama3:8b`.
+- **A missing model raises at once rather than polling.** One side effect: if Signal is still starting at that moment, the alert fails too, and the missing heartbeat covers it.
+- **`send_alert()` skips the `/v1/about` probe.** The POST itself shows whether the alert got through, and a failed probe would only add a second way to lose it.
+- **Dry runs never send an alert.** They print it, and they do not wait for Signal, so `--dry-run` stays safe for any real-data testing.
+- **Tests can no longer reach a real Signal API by accident.** Now that `__main__` sends a real alert, an unmocked test could otherwise message the user's phone, given that `import main` can load a real `.env`. `tests/test_main.py` and `tests/test_notifier.py` make any unmocked request fail.
+
+Not verified end to end: **an alert actually arriving on a phone**. Delivery is covered by mocked tests, and every failure path was run for real under `--dry-run`, which prints the alert instead, but no real alert has been sent, because that needs the user's say-so. To check it, with Ollama stopped: `python3 main.py`.
 
 ---
 

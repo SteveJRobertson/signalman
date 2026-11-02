@@ -184,6 +184,48 @@ class TestOllamaRetries:
                 Settings.from_env()
 
 
+class TestReadinessAndOAuthTimeout:
+    @pytest.mark.parametrize(
+        ("var", "attr", "default"),
+        [
+            ("READINESS_ATTEMPTS", "readiness_attempts", 6),
+            ("READINESS_INTERVAL", "readiness_interval", 10),
+            ("GMAIL_OAUTH_TIMEOUT", "gmail_oauth_timeout", 300),
+        ],
+    )
+    def test_default_and_custom(self, monkeypatch, var, attr, default):
+        _set_required(monkeypatch)
+        monkeypatch.delenv(var, raising=False)
+        assert getattr(Settings.from_env(), attr) == default
+
+        monkeypatch.setenv(var, "99")
+        assert getattr(Settings.from_env(), attr) == 99
+
+    @pytest.mark.parametrize(
+        ("var", "bad"),
+        [
+            ("READINESS_ATTEMPTS", "0"),
+            ("READINESS_ATTEMPTS", "x"),
+            ("READINESS_INTERVAL", "-1"),
+            ("READINESS_INTERVAL", "x"),
+            ("GMAIL_OAUTH_TIMEOUT", "0"),
+            ("GMAIL_OAUTH_TIMEOUT", "x"),
+        ],
+    )
+    def test_invalid_values_name_the_variable(self, monkeypatch, var, bad):
+        _set_required(monkeypatch)
+        monkeypatch.setenv(var, bad)
+
+        with pytest.raises(ValueError, match=var):
+            Settings.from_env()
+
+    def test_zero_interval_is_allowed(self, monkeypatch):
+        _set_required(monkeypatch)
+        monkeypatch.setenv("READINESS_INTERVAL", "0")
+
+        assert Settings.from_env().readiness_interval == 0
+
+
 class TestMaxBodyChars:
     def test_default(self, monkeypatch):
         _set_required(monkeypatch)

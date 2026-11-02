@@ -6,6 +6,8 @@ container is required.
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
+
 import requests
 import pytest
 
@@ -32,6 +34,11 @@ def _item(category: str, summary: str, email_id: str = "id") -> TriagedItem:
     return TriagedItem(
         email_id=email_id, sender="sender@example.com", subject="subj", category=category, summary=summary
     )
+
+
+@pytest.fixture(autouse=True)
+def no_real_http(requests_mock):
+    """A send that nothing mocked must fail here, never reach a real Signal API."""
 
 
 def _result(*items: TriagedItem, failed: tuple[str, ...] = ()) -> TriageResult:
@@ -171,6 +178,169 @@ class TestFailedClassifications:
 # ---------------------------------------------------------------------------
 # Tests: send – successful HTTP call
 # ---------------------------------------------------------------------------
+
+class TestFetchFailures:
+    def test_called_out(self):
+        result = TriageResult(fetch_failed_ids=("a", "b"))
+
+        assert "⚠️ 2 emails could not be fetched" in SignalNotifier.format_message(result)
+
+    def test_singular_wording(self):
+        result = TriageResult(fetch_failed_ids=("a",))
+
+        assert "⚠️ 1 email could not be fetched" in SignalNotifier.format_message(result)
+
+    def test_gmail_refusing_everything_is_not_reported_as_all_clear(self):
+        message = SignalNotifier.format_message(TriageResult(fetch_failed_ids=("a",)))
+
+        assert "All clear" not in message
+
+    def test_both_kinds_of_failure_are_shown(self):
+        message = SignalNotifier.format_message(
+            TriageResult(failed_ids=("a",), fetch_failed_ids=("b", "c"))
+        )
+
+        assert "1 email could not be classified" in message
+        assert "2 emails could not be fetched" in message
+
+    def test_shown_alongside_items(self):
+        message = SignalNotifier.format_message(
+            TriageResult(items=(_item("urgent", "Call back"),), fetch_failed_ids=("a",))
+        )
+
+        assert "Call back" in message and "could not be fetched" in message
+
+
+class TestDigestCap:
+    def _message(self, category: str, count: int) -> str:
+        items = [_item(category, f"item-{i}") for i in range(count)]
+        return SignalNotifier.format_message(_result(*items))
+
+    def test_twenty_items_are_all_shown_without_a_note(self):
+        message = self._message("digest", 20)
+
+        assert "item-19" in message
+        assert "more" not in message
+
+    def test_twenty_one_items_hide_exactly_one(self):
+        message = self._message("digest", 21)
+
+        assert "item-19" in message and "item-20" not in message
+        assert "…and 1 more" in message
+
+    def test_large_digest_says_how_many_are_hidden(self):
+        message = self._message("digest", 67)
+
+        assert message.count("•") == 20
+        assert "…and 47 more" in message
+
+    def test_shows_the_first_twenty_in_order(self):
+        lines = self._message("digest", 25).splitlines()
+
+        assert [line for line in lines if "•" in line][0].endswith("item-0")
+        assert [line for line in lines if "•" in line][-1].endswith("item-19")
+
+    @pytest.mark.parametrize("category", ["urgent", "tasks"])
+    def test_urgent_and_tasks_are_never_capped(self, category):
+        message = self._message(category, 200)
+
+        assert message.count("•") == 200
+        assert "more" not in message
+
+    def test_cap_only_touches_the_digest(self):
+        items = [_item("urgent", f"u{i}") for i in range(30)]
+        items += [_item("digest", f"d{i}") for i in range(30)]
+
+        message = SignalNotifier.format_message(_result(*items))
+
+        assert message.count("•") == 50
+        assert "…and 10 more" in message
+
+
+class TestHeartbeat:
+    """The empty briefing is the safety net: no message at all means something broke."""
+
+    def test_empty_briefing_is_actually_delivered(self, requests_mock):
+        requests_mock.get("http://localhost:8080/v1/about", json={})
+        requests_mock.post("http://localhost:8080/v2/send", status_code=201)
+
+        SignalNotifier(_settings()).send(TriageResult())
+
+        assert "All clear" in requests_mock.last_request.json()["message"]
+
+
+class TestCheckReady:
+    def test_passes_when_container_answers(self, requests_mock):
+        requests_mock.get("http://localhost:8080/v1/about", json={})
+
+        SignalNotifier(_settings()).check_ready()
+
+    @pytest.mark.parametrize(
+        "response",
+        [
+            {"exc": requests.exceptions.ConnectionError},
+            {"exc": requests.exceptions.Timeout},
+            {"status_code": 500},
+            {"status_code": 404},
+        ],
+    )
+    def test_anything_else_is_a_connection_error(self, requests_mock, response):
+        requests_mock.get("http://localhost:8080/v1/about", **response)
+
+        with pytest.raises(ConnectionError, match="Signal"):
+            SignalNotifier(_settings()).check_ready()
+
+
+class TestFailureAlert:
+    NOW = datetime(2026, 11, 2, 8, 0, 5, tzinfo=timezone.utc)
+
+    def test_format_has_type_message_and_timestamp(self):
+        message = SignalNotifier.format_alert(RuntimeError("it broke"), now=self.NOW)
+
+        assert message == "🔴 Signalman failed\nRuntimeError: it broke\n2026-11-02T08:00:05+00:00"
+
+    def test_default_timestamp_is_timezone_aware_iso(self):
+        stamp = SignalNotifier.format_alert(RuntimeError("x")).splitlines()[-1]
+
+        assert datetime.fromisoformat(stamp).tzinfo is not None
+
+    def test_long_multiline_detail_is_flattened_and_bounded(self):
+        message = SignalNotifier.format_alert(RuntimeError("line one\n\n  line two " + "x" * 2000))
+
+        lines = message.splitlines()
+        assert len(lines) == 3
+        assert lines[1].startswith("RuntimeError: line one line two x")
+        assert len(lines[1]) <= len("RuntimeError: ") + 500
+
+    def test_alert_is_posted_to_the_recipient(self, requests_mock):
+        requests_mock.post("http://localhost:8080/v2/send", status_code=201)
+
+        SignalNotifier(_settings()).send_alert(RuntimeError("it broke"))
+
+        payload = requests_mock.last_request.json()
+        assert "RuntimeError: it broke" in payload["message"]
+        assert payload["number"] == "+10000000001"
+        assert payload["recipients"] == ["+10000000002"]
+
+    def test_alert_skips_the_reachability_probe(self, requests_mock):
+        requests_mock.post("http://localhost:8080/v2/send", status_code=201)
+
+        SignalNotifier(_settings()).send_alert(RuntimeError("x"))
+
+        assert [r.method for r in requests_mock.request_history] == ["POST"]
+
+    def test_delivery_failure_is_raised_for_the_caller(self, requests_mock):
+        requests_mock.post("http://localhost:8080/v2/send", status_code=500)
+
+        with pytest.raises(requests.HTTPError):
+            SignalNotifier(_settings()).send_alert(RuntimeError("x"))
+
+    def test_dry_run_prints_and_sends_nothing(self, requests_mock, capsys):
+        SignalNotifier(_settings(dry_run=True)).send_alert(RuntimeError("it broke"))
+
+        assert "RuntimeError: it broke" in capsys.readouterr().out
+        assert requests_mock.call_count == 0
+
 
 class TestSendSuccess:
     def test_post_called_on_send(self, requests_mock):

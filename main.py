@@ -1,8 +1,9 @@
 """Signalman orchestrator.
 
-Loads settings from the environment, fetches unread emails via
-GmailProvider, triages them with AIProcessor, and delivers the daily
-briefing via SignalNotifier.
+Loads settings from the environment, waits for Ollama and Signal to be ready,
+fetches unread emails via GmailProvider, triages them with AIProcessor, and
+delivers the daily briefing via SignalNotifier. If anything fails after that
+first step, a Signal alert says what went wrong.
 
 Usage::
 
@@ -20,6 +21,7 @@ import argparse
 import dataclasses
 import logging
 import sys
+import time
 
 from dotenv import load_dotenv
 
@@ -85,8 +87,51 @@ def apply_args(settings: Settings, args: argparse.Namespace) -> Settings:
     return dataclasses.replace(settings, **overrides)
 
 
+def wait_until_ready(settings: Settings, processor: AIProcessor, notifier: SignalNotifier) -> None:
+    """Poll the services a run depends on until they all answer.
+
+    At 08:00 after a restart Ollama and Docker are routinely still starting, so
+    waiting here turns the most common real failure into a non-event. A dry run
+    never contacts Signal, so it does not wait for it either.
+
+    Raises:
+        ConnectionError: If anything is still not ready after the last attempt.
+        processor_ai.ModelNotFoundError: At once if the model is not installed,
+            since no amount of waiting will install it.
+    """
+    checks = [processor.check_ready]
+    if not settings.dry_run:
+        checks.append(notifier.check_ready)
+
+    attempts = settings.readiness_attempts
+    for attempt in range(1, attempts + 1):
+        problems: list[str] = []
+        for check in checks:
+            try:
+                check()
+            except ConnectionError as exc:
+                problems.append(str(exc))
+        if not problems:
+            return
+        if attempt < attempts:
+            logger.info(
+                "Not ready (attempt %d/%d): %s Retrying in %ds…",
+                attempt,
+                attempts,
+                " ".join(problems),
+                settings.readiness_interval,
+            )
+            time.sleep(settings.readiness_interval)
+
+    raise ConnectionError(f"Still not ready after {attempts} attempts: {' '.join(problems)}")
+
+
 def run(settings: Settings) -> None:
-    """Fetch emails, triage them, and send the daily briefing via Signal."""
+    """Check the services are up, fetch and triage emails, and send the briefing."""
+    processor = AIProcessor(settings)
+    notifier = SignalNotifier(settings)
+    wait_until_ready(settings, processor, notifier)
+
     logger.info("Fetching unread emails from Gmail…")
     provider = GmailProvider.from_credentials(settings)
     emails = provider.fetch_unread_emails()
@@ -98,8 +143,9 @@ def run(settings: Settings) -> None:
     ]
 
     logger.info("Triaging emails with AI processor…")
-    processor = AIProcessor(settings)
-    result = processor.triage(emails)
+    result = dataclasses.replace(
+        processor.triage(emails), fetch_failed_ids=tuple(provider.failed_ids)
+    )
     logger.info(
         "Triage complete – urgent=%d, tasks=%d, digest=%d, ignored=%d, failed=%d.",
         len(result.by_category("urgent")),
@@ -110,20 +156,41 @@ def run(settings: Settings) -> None:
     )
 
     logger.info("Printing briefing (dry run)…" if settings.dry_run else "Sending Signal briefing…")
-    notifier = SignalNotifier(settings)
     notifier.send(result)
     logger.info("Dry run complete; nothing sent." if settings.dry_run else "Briefing sent successfully.")
+
+
+def report_failure(settings: Settings, error: Exception) -> None:
+    """Try to tell the user that the run failed. Never raises.
+
+    If the alert fails as well there is nothing further to try: the day's
+    missing briefing is then the only signal, which is why it is sent daily.
+    """
+    try:
+        SignalNotifier(settings).send_alert(error)
+    except Exception as exc:  # noqa: BLE001
+        logger.error("Could not send the failure alert: %s: %s", type(exc).__name__, exc)
 
 
 if __name__ == "__main__":
     args = parse_args()
     if args.verbose:
         enable_verbose_logging()
+
+    # Apart from the run itself: until settings exist there is nobody to alert,
+    # and a KeyError from later on does not mean a variable is missing.
     try:
-        run(apply_args(Settings.from_env(), args))
+        settings = apply_args(Settings.from_env(), args)
     except KeyError as exc:
         logger.error("Missing required environment variable: %s", exc)
         sys.exit(1)
+    except ValueError as exc:
+        logger.error("Invalid configuration: %s", exc)
+        sys.exit(1)
+
+    try:
+        run(settings)
     except Exception as exc:  # noqa: BLE001
-        logger.error("Signalman failed: %s", exc)
+        logger.error("Signalman failed: %s: %s", type(exc).__name__, exc)
+        report_failure(settings, exc)
         sys.exit(1)

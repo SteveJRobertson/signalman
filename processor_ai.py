@@ -47,7 +47,7 @@ _RESPONSE_SCHEMA: dict[str, Any] = {
     "required": ["category", "summary"],
 }
 _MIN_SCHEMA_VERSION = (0, 5, 0)  # the first Ollama to accept a schema in ``format``
-_VERSION_PROBE_TIMEOUT = 5  # seconds
+_PROBE_TIMEOUT = 5  # seconds, for the version and readiness checks
 
 _RETRY_BACKOFF_SECONDS = 1  # doubles after each failed attempt
 # At temperature 0 the model replays the same reply exactly, so retrying an
@@ -77,6 +77,18 @@ class OllamaRequestError(ClassificationError):
     """Ollama itself failed (no reply at all), as opposed to giving an unusable one."""
 
 
+class ModelNotFoundError(Exception):
+    """Ollama is up but the configured model is not installed; waiting will not help."""
+
+
+def _with_tag(model: str) -> str:
+    """Spell out the implicit ``:latest``, as ``/api/tags`` does.
+
+    A colon before the last ``/`` is a registry port, not a tag.
+    """
+    return model if ":" in model.rsplit("/", 1)[-1] else f"{model}:latest"
+
+
 @dataclass(frozen=True, slots=True)
 class TriagedItem:
     """The verdict for a single email."""
@@ -95,6 +107,7 @@ class TriageResult:
     items: tuple[TriagedItem, ...] = ()
     failed_ids: tuple[str, ...] = ()  # classification failed
     skipped_count: int = 0  # already reported on a previous day (Phase 7)
+    fetch_failed_ids: tuple[str, ...] = ()  # Gmail would not give us these, so never triaged
 
     def by_category(self, category: Category) -> list[TriagedItem]:
         """Return the items in *category*, in the order they were triaged."""
@@ -137,6 +150,34 @@ class AIProcessor:
     # ------------------------------------------------------------------
     # Public API
     # ------------------------------------------------------------------
+
+    def check_ready(self) -> None:
+        """Verify Ollama is answering and has the configured model installed.
+
+        Raises:
+            ConnectionError: If Ollama is not answering properly yet, which is
+                worth waiting for.
+            ModelNotFoundError: If the model is not installed, which is not.
+        """
+        base_url = self.settings.ollama_url
+        try:
+            response = requests.get(f"{base_url}/api/tags", timeout=_PROBE_TIMEOUT)
+            response.raise_for_status()
+            installed = {_with_tag(model["name"]) for model in response.json()["models"] or []}
+        except (requests.exceptions.ConnectionError, requests.exceptions.Timeout) as exc:
+            raise ConnectionError(
+                f"Ollama is unreachable at {base_url}. Make sure Ollama is running."
+            ) from exc
+        except requests.RequestException as exc:
+            raise ConnectionError(f"Ollama returned an error at {base_url}: {exc}") from exc
+        except (ValueError, KeyError, TypeError) as exc:
+            raise ConnectionError(f"Ollama sent an unexpected reply at {base_url}.") from exc
+
+        if _with_tag(self.model) not in installed:
+            raise ModelNotFoundError(
+                f"Ollama has no model {self.model!r}. Install it with `ollama pull {self.model}` "
+                "or change OLLAMA_MODEL."
+            )
 
     def triage(self, emails: list[dict]) -> TriageResult:
         """Classify each of *emails* and return the combined result.
@@ -244,7 +285,7 @@ class AIProcessor:
         ``"0.40.5" < "0.5.0"`` as text), or ``()`` if it cannot be determined."""
         try:
             response = requests.get(
-                f"{self.settings.ollama_url}/api/version", timeout=_VERSION_PROBE_TIMEOUT
+                f"{self.settings.ollama_url}/api/version", timeout=_PROBE_TIMEOUT
             )
             response.raise_for_status()
             return tuple(int(part) for part in re.findall(r"\d+", response.json()["version"])[:3])

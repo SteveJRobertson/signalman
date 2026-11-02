@@ -10,12 +10,14 @@ import base64
 import logging
 import os
 import re
+import sys
 from pathlib import Path
 from typing import Any
 
 import html2text
 from google.oauth2.credentials import Credentials
-from google_auth_oauthlib.flow import InstalledAppFlow
+from google_auth_oauthlib.flow import InstalledAppFlow, WSGITimeoutError
+from google.auth.exceptions import RefreshError
 from google.auth.transport.requests import Request
 from googleapiclient.discovery import build
 
@@ -29,6 +31,12 @@ _TEXT_TYPES = ("text/plain", "text/html")
 _BATCH_SIZE = 50  # messages fetched per batch request
 
 SCOPES = ["https://www.googleapis.com/auth/gmail.readonly"]
+
+_SIGN_IN_HINT = "Run `python3 main.py --dry-run --limit 1` in a terminal to sign in again."
+
+
+class GmailAuthError(Exception):
+    """Gmail needs a person: there is no usable sign-in and nobody here to redo it."""
 
 
 class _DropConsentRedirect(logging.Filter):
@@ -53,6 +61,40 @@ def _save_token(token_path: Path, token_json: str) -> None:
         handle.write(token_json)
 
 
+def _refusal_reason(exc: RefreshError) -> str:
+    """Return Google's one-line reason, leaving out the raw response that follows it."""
+    return str(exc.args[0]) if exc.args else "no reason given"
+
+
+def _sign_in(settings: Settings, problem: str) -> Credentials:
+    """Run the interactive consent flow, if there is anyone to complete it.
+
+    ``run_local_server`` blocks until the browser redirect arrives, so the
+    launchd job (whose stdin is ``/dev/null``) must never reach it: it would
+    wait forever and tell no one. At a terminal it is still bounded, in case
+    whoever started it has walked away.
+
+    Raises:
+        GmailAuthError: If nobody is at a terminal, or nobody answered in time.
+    """
+    if not sys.stdin.isatty():
+        raise GmailAuthError(f"Gmail needs signing in: {problem}. {_SIGN_IN_HINT}")
+
+    logger.warning("Gmail needs signing in: %s.", problem)
+    flow = InstalledAppFlow.from_client_secrets_file(str(settings.gmail_credentials_path), SCOPES)
+    try:
+        return flow.run_local_server(
+            host="127.0.0.1",
+            port=settings.gmail_oauth_port,
+            open_browser=False,
+            timeout_seconds=settings.gmail_oauth_timeout,
+        )
+    except WSGITimeoutError as exc:
+        raise GmailAuthError(
+            f"Gave up waiting for Gmail sign-in after {settings.gmail_oauth_timeout} seconds."
+        ) from exc
+
+
 class GmailProvider:
     """Fetches unread emails from Gmail using the Google API."""
 
@@ -74,27 +116,33 @@ class GmailProvider:
         """Authenticate with OAuth2 and return a ready-to-use GmailProvider.
 
         Looks for ``settings.gmail_token_path`` (refreshed automatically) and
-        falls back to ``settings.gmail_credentials_path`` for the initial
-        interactive OAuth flow.
+        falls back to ``settings.gmail_credentials_path`` for the interactive
+        OAuth flow, but only when someone is at a terminal to complete it.
+
+        Raises:
+            GmailAuthError: If there is no usable sign-in and nobody to redo it.
         """
         token_path = settings.gmail_token_path
         creds: Credentials | None = None
+        problem = f"there is no saved sign-in at {token_path}"
 
         if token_path.exists():
-            creds = Credentials.from_authorized_user_file(str(token_path), SCOPES)
+            try:
+                creds = Credentials.from_authorized_user_file(str(token_path), SCOPES)
+                problem = "the saved sign-in has expired and cannot be refreshed"
+            except ValueError:
+                problem = f"{token_path} is not a valid token file"
 
         if not creds or not creds.valid:
+            refreshed = False
             if creds and creds.expired and creds.refresh_token:
-                creds.refresh(Request())
-            else:
-                flow = InstalledAppFlow.from_client_secrets_file(
-                    str(settings.gmail_credentials_path), SCOPES
-                )
-                creds = flow.run_local_server(
-                    host="127.0.0.1",
-                    port=settings.gmail_oauth_port,
-                    open_browser=False,
-                )
+                try:
+                    creds.refresh(Request())
+                    refreshed = True
+                except RefreshError as exc:
+                    problem = f"Google rejected the saved sign-in ({_refusal_reason(exc)})"
+            if not refreshed:
+                creds = _sign_in(settings, problem)
             _save_token(token_path, creds.to_json())
 
         service = build("gmail", "v1", credentials=creds)
@@ -112,8 +160,17 @@ class GmailProvider:
             - ``subject`` : Email subject (empty string if missing)
             - ``sender``  : From header value (empty string if missing)
             - ``body``    : Body as text — plain if available, else converted HTML (empty string if missing)
+
+        Raises:
+            GmailAuthError: If Google rejects the sign-in. A token revoked
+                before its expiry date only shows up here, on first use.
         """
-        message_ids = self._list_unread_ids()
+        try:
+            message_ids = self._list_unread_ids()
+        except RefreshError as exc:
+            raise GmailAuthError(
+                f"Google rejected the saved sign-in ({_refusal_reason(exc)}). {_SIGN_IN_HINT}"
+            ) from exc
         emails_by_id: dict[str, dict] = {}
         self.failed_ids = []
 
