@@ -6,9 +6,13 @@ delivers it via the Signal REST API running in a Docker container.
 
 from __future__ import annotations
 
+import logging
+
 import requests
 
 from config import Settings
+
+logger = logging.getLogger(__name__)
 
 
 class SignalNotifier:
@@ -27,6 +31,10 @@ class SignalNotifier:
     def send(self, triage: dict[str, list[str]]) -> None:
         """Format *triage* and deliver it via the Signal REST API.
 
+        In dry-run mode (``settings.dry_run``), the formatted briefing is
+        printed to stdout and no Signal call is made — not even the
+        reachability check.
+
         Args:
             triage: A dict with keys ``urgent``, ``tasks``, and ``digest``,
                     each mapping to a list of concise string descriptions
@@ -36,8 +44,14 @@ class SignalNotifier:
             ConnectionError: If the Signal API Docker container is unreachable.
             requests.HTTPError: If the API returns a non-2xx response.
         """
-        self._check_reachable()
         message = self.format_message(triage)
+
+        if self.settings.dry_run:
+            logger.info("Dry run: printing briefing instead of sending via Signal.")
+            print(message)
+            return
+
+        self._check_reachable()
         payload = {
             "message": message,
             "number": self.sender,
