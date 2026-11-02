@@ -238,6 +238,32 @@ class TestApiRequestPayload:
 
 
 # ---------------------------------------------------------------------------
+# Tests: verbose/debug logging (preview mode)
+# ---------------------------------------------------------------------------
+#
+# --verbose is what makes prompt tuning practical — without the prompt and
+# raw reply visible, iterating on the classification prompt is guesswork.
+# These confirm the debug logging that flag depends on actually fires.
+
+class TestVerboseLogging:
+    def test_prompt_logged_at_debug(self, requests_mock, caplog):
+        _register_ollama_response(requests_mock, {"urgent": [], "tasks": [], "digest": []})
+
+        with caplog.at_level("DEBUG", logger="processor_ai"):
+            AIProcessor(_settings()).triage(_sample_emails())
+
+        assert any("Interview invitation" in record.message for record in caplog.records)
+
+    def test_raw_reply_logged_at_debug(self, requests_mock, caplog):
+        _register_ollama_response(requests_mock, {"urgent": ["Server down"], "tasks": [], "digest": []})
+
+        with caplog.at_level("DEBUG", logger="processor_ai"):
+            AIProcessor(_settings()).triage(_sample_emails())
+
+        assert any("Server down" in record.message for record in caplog.records)
+
+
+# ---------------------------------------------------------------------------
 # Tests: error handling
 # ---------------------------------------------------------------------------
 
