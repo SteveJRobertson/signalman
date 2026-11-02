@@ -315,6 +315,8 @@ Wrap `_call_ollama` in a bounded retry (`ollama_retries`, default 2, 1s then 2s 
 
 Guard `response.json()["response"]` — currently an unhandled `KeyError` if the response shape differs.
 
+*As built:* a retry after an unusable reply runs at a small non-zero temperature, because at 0 the model replays the same reply exactly and the retry could never help; the first attempt stays at 0. And three emails in a row with no reply at all abort the run rather than being recorded, so that a hung Ollama reaches the failure alert instead of taking hours to get through the inbox. Details in `TASKS.md`.
+
 Surface failures in the briefing: *"⚠️ 3 emails could not be classified"*. A silently short briefing is the failure mode being designed out.
 
 ### Tests

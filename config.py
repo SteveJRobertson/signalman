@@ -104,6 +104,10 @@ class Settings:
             if value < 1:
                 raise ValueError(f"{name} must be at least 1, got {value}")
 
+        ollama_retries = _env_int("OLLAMA_RETRIES", _DEFAULT_OLLAMA_RETRIES)
+        if ollama_retries < 0:
+            raise ValueError(f"OLLAMA_RETRIES must be at least 0, got {ollama_retries}")
+
         max_body_chars = _env_int("MAX_BODY_CHARS", _DEFAULT_MAX_BODY_CHARS)
         if max_body_chars < 1:
             raise ValueError(f"MAX_BODY_CHARS must be at least 1, got {max_body_chars}")
@@ -122,5 +126,6 @@ class Settings:
             ollama_model=os.getenv("OLLAMA_MODEL", _DEFAULT_OLLAMA_MODEL),
             ollama_num_ctx=ollama_num_ctx,
             ollama_timeout=ollama_timeout,
+            ollama_retries=ollama_retries,
             max_body_chars=max_body_chars,
         )

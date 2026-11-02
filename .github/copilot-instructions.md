@@ -60,6 +60,7 @@ Gmail API → provider_gmail.py → processor_ai.py (Ollama) → notifier_signal
 | `MAX_BODY_CHARS`          | ❌       | `6000`                                |
 | `OLLAMA_NUM_CTX`          | ❌       | `8192`                                |
 | `OLLAMA_TIMEOUT`          | ❌       | `120`                                 |
+| `OLLAMA_RETRIES`          | ❌       | `2`                                   |
 | `OLLAMA_URL`              | ❌       | `http://localhost:11434`              |
 | `OLLAMA_MODEL`            | ❌       | `llama3`                              |
 
