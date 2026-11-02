@@ -63,7 +63,7 @@ Things that are easy to get wrong:
 - Required settings use `os.environ["VAR"]` inside `Settings.from_env()` so a missing one raises `KeyError` (caught in `main.py`'s `__main__` block → `sys.exit(1)`). Optional ones use `os.getenv("VAR", default)`. When renaming an env var, replace the old name — never add alongside.
 - All HTTP goes through `requests`. Never shell out via `subprocess` to a CLI tool.
 - Tests are fully mocked: no credentials, no network, no running services. Mock HTTP with the `requests-mock` pytest fixture — do **not** `unittest.mock.patch` `requests` itself. (`unittest.mock` is fine for the Gmail service object and for the module-level classes in `test_main.py`.)
-- Never log credentials, tokens, or phone numbers. `.env`, `credentials.json`, and `token.json` are gitignored and must stay that way.
+- Never log credentials, tokens, or phone numbers, and never raise the root logger to DEBUG: Google's auth libraries log OAuth tokens at that level, so `--verbose` raises only `main._VERBOSE_LOGGERS` (add any new module with a logger there). `.env`, `credentials.json`, and `token.json` are gitignored and must stay that way.
 
 ## Planned work
 
