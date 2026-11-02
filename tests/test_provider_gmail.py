@@ -6,15 +6,17 @@ All Gmail API calls are mocked so no real credentials are required.
 from __future__ import annotations
 
 import base64
+import dataclasses
 import logging
 import stat
 from unittest.mock import MagicMock, patch
 
 import pytest
-from google_auth_oauthlib.flow import _WSGIRequestHandler
+from google.auth.exceptions import RefreshError, TransportError
+from google_auth_oauthlib.flow import WSGITimeoutError, _WSGIRequestHandler
 
 from config import Settings
-from provider_gmail import GmailProvider
+from provider_gmail import GmailAuthError, GmailProvider
 
 
 # ---------------------------------------------------------------------------
@@ -713,9 +715,11 @@ class TestTokenFile:
         creds.to_json.return_value = '{"token": "new"}'
 
         with (
+            patch("provider_gmail.sys.stdin") as stdin,
             patch("provider_gmail.InstalledAppFlow") as flow_cls,
             patch("provider_gmail.build"),
         ):
+            stdin.isatty.return_value = True
             flow_cls.from_client_secrets_file.return_value.run_local_server.return_value = creds
             GmailProvider.from_credentials(settings)
 
@@ -740,6 +744,201 @@ class TestTokenFile:
         creds.refresh.assert_called_once()
         assert settings.gmail_token_path.read_text() == '{"token": "new"}'
         assert _mode(settings.gmail_token_path) == 0o600
+
+
+# ---------------------------------------------------------------------------
+# Tests: signing in, attended and unattended
+# ---------------------------------------------------------------------------
+
+_INVALID_GRANT = RefreshError(
+    "invalid_grant: Token has been expired or revoked.",
+    {"error": "invalid_grant", "raw_field": "RAW-RESPONSE-MARKER"},
+)
+
+
+def _expired_creds(refresh_error: Exception | None = None) -> MagicMock:
+    creds = MagicMock(valid=False, expired=True, refresh_token="r")
+    creds.refresh.side_effect = refresh_error
+    creds.to_json.return_value = '{"token": "refreshed"}'
+    return creds
+
+
+class TestSignIn:
+    """The launchd job has no terminal: it must fail fast, never wait for a browser."""
+
+    def _from_credentials(self, settings, *, terminal: bool, creds=None, load_error=None):
+        """Run from_credentials with Google mocked; self.flow is there to inspect afterwards."""
+        new_creds = MagicMock()
+        new_creds.to_json.return_value = '{"token": "from-consent"}'
+        with (
+            patch("provider_gmail.sys.stdin") as stdin,
+            patch("provider_gmail.Credentials") as creds_cls,
+            patch("provider_gmail.InstalledAppFlow") as flow_cls,
+            patch("provider_gmail.Request"),
+            patch("provider_gmail.build"),
+        ):
+            stdin.isatty.return_value = terminal
+            creds_cls.from_authorized_user_file.return_value = creds
+            creds_cls.from_authorized_user_file.side_effect = load_error
+            flow = flow_cls.from_client_secrets_file.return_value
+            flow.run_local_server.return_value = new_creds
+            self.flow = flow
+            self.flow_cls = flow_cls
+            return GmailProvider.from_credentials(settings)
+
+    # ---- unattended ----
+
+    def test_missing_token_fails_fast_without_starting_the_flow(self, tmp_path):
+        settings = _token_settings(tmp_path)
+
+        with pytest.raises(GmailAuthError) as exc_info:
+            self._from_credentials(settings, terminal=False)
+
+        self.flow_cls.from_client_secrets_file.assert_not_called()
+        self.flow.run_local_server.assert_not_called()
+        assert str(settings.gmail_token_path) in str(exc_info.value)
+        assert "python3 main.py --dry-run --limit 1" in str(exc_info.value)
+
+    def test_rejected_refresh_token_fails_fast_and_says_why(self, tmp_path):
+        settings = _token_settings(tmp_path)
+        settings.gmail_token_path.write_text("{}")
+
+        with pytest.raises(GmailAuthError, match="expired or revoked") as exc_info:
+            self._from_credentials(settings, terminal=False, creds=_expired_creds(_INVALID_GRANT))
+
+        self.flow.run_local_server.assert_not_called()
+        assert "python3 main.py --dry-run --limit 1" in str(exc_info.value)
+
+    def test_rejected_refresh_keeps_the_token_file(self, tmp_path):
+        """Nothing better has replaced it, so nothing should overwrite it."""
+        settings = _token_settings(tmp_path)
+        settings.gmail_token_path.write_text('{"token": "old"}')
+
+        with pytest.raises(GmailAuthError):
+            self._from_credentials(settings, terminal=False, creds=_expired_creds(_INVALID_GRANT))
+
+        assert settings.gmail_token_path.read_text() == '{"token": "old"}'
+
+    def test_error_leaves_out_googles_raw_response(self, tmp_path):
+        settings = _token_settings(tmp_path)
+        settings.gmail_token_path.write_text("{}")
+
+        with pytest.raises(GmailAuthError) as exc_info:
+            self._from_credentials(settings, terminal=False, creds=_expired_creds(_INVALID_GRANT))
+
+        assert "RAW-RESPONSE-MARKER" not in str(exc_info.value)
+
+    def test_corrupt_token_file_fails_fast(self, tmp_path):
+        settings = _token_settings(tmp_path)
+        settings.gmail_token_path.write_text("not json")
+
+        with pytest.raises(GmailAuthError, match="not a valid token file"):
+            self._from_credentials(settings, terminal=False, load_error=ValueError("bad"))
+
+        self.flow.run_local_server.assert_not_called()
+
+    def test_expired_token_with_no_refresh_token_fails_fast(self, tmp_path):
+        settings = _token_settings(tmp_path)
+        settings.gmail_token_path.write_text("{}")
+        creds = MagicMock(valid=False, expired=True, refresh_token=None)
+
+        with pytest.raises(GmailAuthError, match="cannot be refreshed"):
+            self._from_credentials(settings, terminal=False, creds=creds)
+
+        self.flow.run_local_server.assert_not_called()
+
+    def test_working_refresh_needs_no_terminal(self, tmp_path):
+        """The normal 08:00 case: an hourly access token, renewed unattended."""
+        settings = _token_settings(tmp_path)
+        settings.gmail_token_path.write_text("{}")
+        creds = _expired_creds()
+
+        self._from_credentials(settings, terminal=False, creds=creds)
+
+        creds.refresh.assert_called_once()
+        self.flow.run_local_server.assert_not_called()
+        assert settings.gmail_token_path.read_text() == '{"token": "refreshed"}'
+
+    def test_valid_token_is_left_alone(self, tmp_path):
+        settings = _token_settings(tmp_path)
+        settings.gmail_token_path.write_text('{"token": "current"}')
+        creds = MagicMock(valid=True)
+
+        self._from_credentials(settings, terminal=False, creds=creds)
+
+        creds.refresh.assert_not_called()
+        self.flow.run_local_server.assert_not_called()
+        assert settings.gmail_token_path.read_text() == '{"token": "current"}'
+
+    def test_a_network_failure_is_not_reported_as_a_lost_sign_in(self, tmp_path):
+        """Only Google refusing the token means a person has to step in."""
+        settings = _token_settings(tmp_path)
+        settings.gmail_token_path.write_text("{}")
+
+        with pytest.raises(TransportError):
+            self._from_credentials(
+                settings, terminal=False, creds=_expired_creds(TransportError("no network"))
+            )
+
+    # ---- at a terminal ----
+
+    def test_missing_token_at_a_terminal_runs_the_flow_with_a_timeout(self, tmp_path):
+        settings = dataclasses.replace(
+            _token_settings(tmp_path), gmail_oauth_port=8123, gmail_oauth_timeout=77
+        )
+
+        self._from_credentials(settings, terminal=True)
+
+        self.flow.run_local_server.assert_called_once_with(
+            host="127.0.0.1", port=8123, open_browser=False, timeout_seconds=77
+        )
+        assert settings.gmail_token_path.read_text() == '{"token": "from-consent"}'
+
+    def test_rejected_refresh_at_a_terminal_signs_in_again(self, tmp_path):
+        """No need to delete token.json by hand first."""
+        settings = _token_settings(tmp_path)
+        settings.gmail_token_path.write_text('{"token": "old"}')
+
+        self._from_credentials(settings, terminal=True, creds=_expired_creds(_INVALID_GRANT))
+
+        self.flow.run_local_server.assert_called_once()
+        assert settings.gmail_token_path.read_text() == '{"token": "from-consent"}'
+
+    def test_corrupt_token_at_a_terminal_signs_in_again(self, tmp_path):
+        settings = _token_settings(tmp_path)
+        settings.gmail_token_path.write_text("not json")
+
+        self._from_credentials(settings, terminal=True, load_error=ValueError("bad"))
+
+        assert settings.gmail_token_path.read_text() == '{"token": "from-consent"}'
+
+    def test_nobody_answering_at_a_terminal_gives_up(self, tmp_path):
+        settings = dataclasses.replace(_token_settings(tmp_path), gmail_oauth_timeout=5)
+
+        with (
+            patch("provider_gmail.sys.stdin") as stdin,
+            patch("provider_gmail.InstalledAppFlow") as flow_cls,
+        ):
+            stdin.isatty.return_value = True
+            flow_cls.from_client_secrets_file.return_value.run_local_server.side_effect = (
+                WSGITimeoutError("Timed out")
+            )
+            with pytest.raises(GmailAuthError, match="after 5 seconds"):
+                GmailProvider.from_credentials(settings)
+
+        assert not settings.gmail_token_path.exists()
+
+    # ---- revoked while the access token still looked valid ----
+
+    def test_rejection_on_first_use_is_reported_the_same_way(self):
+        service = MagicMock()
+        service.users().messages().list().execute.side_effect = _INVALID_GRANT
+
+        with pytest.raises(GmailAuthError, match="expired or revoked") as exc_info:
+            GmailProvider.from_service(service).fetch_unread_emails()
+
+        assert "python3 main.py --dry-run --limit 1" in str(exc_info.value)
+        assert "RAW-RESPONSE-MARKER" not in str(exc_info.value)
 
 
 # ---------------------------------------------------------------------------

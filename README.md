@@ -12,8 +12,8 @@ Gmail API → provider_gmail.py → processor_ai.py (Ollama) → notifier_signal
 
 1. **Gmail Fetcher** (`provider_gmail.py`) – authenticates with OAuth 2.0 and retrieves unread emails from the last 24 hours.
 2. **AI Processor** (`processor_ai.py`) – sends each email to a local Ollama LLM (one call per email) and returns a verdict per email: `urgent`, `tasks`, `digest`, or `ignore` (junk, left out of the briefing).
-3. **Signal Notifier** (`notifier_signal.py`) – formats the verdicts (and flags any email that could not be classified) and delivers it via the Signal REST API.
-4. **Orchestrator** (`main.py`) – wires the three modules together, reads configuration from `.env`, and handles errors gracefully.
+3. **Signal Notifier** (`notifier_signal.py`) – formats the verdicts (and flags any email that could not be fetched or classified) and delivers it via the Signal REST API.
+4. **Orchestrator** (`main.py`) – wires the three modules together, reads configuration from `.env`, waits for Ollama and Signal to be ready, and sends you a Signal alert if a run fails ([details](#when-something-goes-wrong)).
 
 ---
 
@@ -67,7 +67,9 @@ Make sure Ollama is running before each scheduled run (it starts automatically o
 4. Create **OAuth 2.0 credentials** (Desktop application type).
 5. Download the credentials JSON file and save it to the project root as `credentials.json`.
 
-On first run the consent flow starts a local listener on `GMAIL_OAUTH_PORT` (default `8085`) and **prints a URL to the terminal** rather than opening a browser itself — so the flow also works over SSH. Open the printed URL in any browser, approve access, and the resulting token is saved automatically as `token.json`, then refreshed on subsequent runs.
+On first run the consent flow starts a local listener on `GMAIL_OAUTH_PORT` (default `8085`) and **prints a URL to the terminal** rather than opening a browser itself — so the flow also works over SSH. Open the printed URL in any browser, approve access within `GMAIL_OAUTH_TIMEOUT` seconds (default 5 minutes), and the resulting token is saved automatically as `token.json`, then refreshed on subsequent runs.
+
+Do this first run **from a terminal**. Without one, as under launchd, Signalman never starts the consent flow, because nobody could complete it. It alerts you instead ([details](#when-something-goes-wrong)).
 
 Add `http://127.0.0.1:8085/` to the **Authorised redirect URIs** of your OAuth client in the Google Cloud console. If you change `GMAIL_OAUTH_PORT`, change the redirect URI to match.
 
@@ -87,7 +89,7 @@ docker run -d --name signal-api \
   bbernhard/signal-cli-rest-api
 ```
 
-The container exposes the API on `http://localhost:8080`. Ensure it is running before each scheduled run.
+The container exposes the API on `http://localhost:8080`. It needs to be running for each scheduled run, though Signalman allows it about a minute to start ([details](#when-something-goes-wrong)).
 
 ---
 
@@ -105,10 +107,13 @@ GMAIL_TOKEN_PATH=token.json
 GMAIL_CREDENTIALS_PATH=credentials.json
 GMAIL_OAUTH_PORT=8085                                  # Local port for the one-off OAuth consent flow
 GMAIL_MAX_EMAILS=500                                   # Safety cap per run; a warning is logged if it hides mail
+GMAIL_OAUTH_TIMEOUT=300                                # Seconds to wait for you to approve the consent URL
 MAX_BODY_CHARS=6000                                    # Longest cleaned email body sent to the model
 OLLAMA_NUM_CTX=8192                                    # Context window requested from Ollama per email
 OLLAMA_TIMEOUT=120                                     # Seconds to wait for Ollama per email
 OLLAMA_RETRIES=2                                       # Extra attempts per email after a failed one (1s, then 2s, apart)
+READINESS_ATTEMPTS=6                                   # Times to check Ollama and Signal are up before giving up
+READINESS_INTERVAL=10                                  # Seconds between those checks
 SIGNAL_API_URL=http://localhost:8080                   # Base URL of the Signal REST API container
 OLLAMA_URL=http://localhost:11434                      # Ollama BASE url — not the full /api/generate endpoint
 OLLAMA_MODEL=llama3
@@ -126,7 +131,7 @@ You should receive a Signal message within a few seconds. Check the terminal for
 
 #### Preview mode
 
-To see the briefing without messaging your phone — for example while tuning the classification prompt — use the flags below. Gmail and Ollama are still contacted; Signal is not (the container does not even need to be running).
+To see the briefing without messaging your phone — for example while tuning the classification prompt — use the flags below. Gmail and Ollama are still contacted; Signal is not (the container does not even need to be running). If the run fails, the alert is printed rather than sent.
 
 | Flag        | Effect                                                                    |
 | ----------- | ------------------------------------------------------------------------- |
@@ -191,6 +196,45 @@ python3 main.py --dry-run --limit 10 --verbose
 
 ---
 
+## When something goes wrong
+
+Signalman runs unattended, so it is built to tell you when it breaks.
+
+**It waits for its services.** Before touching your mail, it checks that Ollama and the Signal container are answering, up to 6 times, 10 seconds apart (`READINESS_ATTEMPTS`, `READINESS_INTERVAL`). At 08:00 after a restart, these are often still starting. If Docker takes longer than a minute to come up on your machine, raise these.
+
+**It alerts you if a run fails.** You get a Signal message saying what went wrong and when:
+
+```
+🔴 Signalman failed
+ConnectionError: Still not ready after 6 attempts: Ollama is unreachable at http://localhost:11434. Make sure Ollama is running.
+2026-11-02T08:01:03+00:00
+```
+
+| What you see | What it means | What to do |
+| ------------ | ------------- | ---------- |
+| `ConnectionError: Still not ready…` | Ollama did not come up in time | Start Ollama |
+| `ModelNotFoundError` | The model in `OLLAMA_MODEL` is not installed | Run the `ollama pull` command it names |
+| `GmailAuthError` | The Gmail sign-in has expired, been revoked, or is missing | Sign in again, as below |
+| `OllamaRequestError: …in a row` | Ollama stopped answering partway through | Check that Ollama is healthy |
+| ⚠️ *N emails could not be classified* or *fetched*, in a briefing | Those emails are missing from the briefing, but the rest arrived | Check `signalman.log` and `signalman.error.log` if it keeps happening |
+| **No message by 09:00** | Something Signalman could not report: Signal itself is down, the machine was off, or the job did not run | Check `signalman.error.log` |
+
+To sign in to Gmail again, run this from a terminal in the project directory, with the virtualenv active. It prints a consent URL, saves the new token, and sends nothing to Signal:
+
+```bash
+python3 main.py --dry-run --limit 1
+```
+
+### The daily briefing is a heartbeat
+
+**A briefing is sent every day, even when there is nothing to report** ("All clear"). This is deliberate, and it is not to be optimised away.
+
+An alert cannot report that Signal is down, or that the machine never woke up. The daily message covers those cases: because something always arrives, its absence means something is wrong. Stop sending the empty one and a quiet inbox becomes indistinguishable from a broken Signalman.
+
+The digest section lists at most 20 items, then says "…and 47 more". Urgent items and tasks are never capped.
+
+---
+
 ## Running the tests
 
 ```bash
@@ -236,10 +280,13 @@ signalman/
 | `GMAIL_CREDENTIALS_PATH`  | ❌       | `credentials.json`                    | Path to the OAuth2 credentials file                    |
 | `GMAIL_OAUTH_PORT`        | ❌       | `8085`                                | Local port used by the one-off OAuth consent flow      |
 | `GMAIL_MAX_EMAILS`        | ❌       | `500`                                 | Safety cap on emails processed per run (a warning is logged if it truncates) |
+| `GMAIL_OAUTH_TIMEOUT`     | ❌       | `300`                                 | Seconds the consent flow waits for you to approve the URL it prints |
 | `MAX_BODY_CHARS`          | ❌       | `6000`                                | Longest email body (after cleaning) sent to the model; longer ones are truncated |
 | `OLLAMA_NUM_CTX`          | ❌       | `8192`                                | Context window (tokens) requested from Ollama for each email |
 | `OLLAMA_TIMEOUT`          | ❌       | `120`                                 | Seconds to wait for Ollama to answer one email |
 | `OLLAMA_RETRIES`          | ❌       | `2`                                   | Extra attempts per email after a timeout, connection error, 5xx or unusable reply (never a 4xx) |
+| `READINESS_ATTEMPTS`      | ❌       | `6`                                   | Times to check Ollama and Signal are up before a run gives up |
+| `READINESS_INTERVAL`      | ❌       | `10`                                  | Seconds between those checks                           |
 | `SIGNAL_API_URL`          | ❌       | `http://localhost:8080`               | Base URL of the Signal REST API container              |
 | `OLLAMA_URL`              | ❌       | `http://localhost:11434`              | Ollama **base** URL (not the full API endpoint)        |
 | `OLLAMA_MODEL`            | ❌       | `llama3`                              | LLM model to use for triage                            |

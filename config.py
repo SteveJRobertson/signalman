@@ -17,11 +17,14 @@ _DEFAULT_GMAIL_TOKEN_PATH = "token.json"
 _DEFAULT_GMAIL_CREDENTIALS_PATH = "credentials.json"
 _DEFAULT_GMAIL_OAUTH_PORT = 8085
 _DEFAULT_GMAIL_MAX_EMAILS = 500
+_DEFAULT_GMAIL_OAUTH_TIMEOUT = 300
 _DEFAULT_OLLAMA_URL = "http://localhost:11434"
 _DEFAULT_OLLAMA_MODEL = "llama3"
 _DEFAULT_OLLAMA_NUM_CTX = 8192
 _DEFAULT_OLLAMA_TIMEOUT = 120
 _DEFAULT_OLLAMA_RETRIES = 2
+_DEFAULT_READINESS_ATTEMPTS = 6
+_DEFAULT_READINESS_INTERVAL = 10
 _DEFAULT_MAX_BODY_CHARS = 6000
 _DEFAULT_STATE_RETENTION_DAYS = 30
 
@@ -57,6 +60,7 @@ class Settings:
     gmail_credentials_path: Path = Path(_DEFAULT_GMAIL_CREDENTIALS_PATH)
     gmail_oauth_port: int = _DEFAULT_GMAIL_OAUTH_PORT
     gmail_max_emails: int = _DEFAULT_GMAIL_MAX_EMAILS
+    gmail_oauth_timeout: int = _DEFAULT_GMAIL_OAUTH_TIMEOUT
 
     # ollama — ollama_url is a BASE url (e.g. http://localhost:11434);
     # endpoints are constructed from it, not baked into the value.
@@ -65,6 +69,11 @@ class Settings:
     ollama_num_ctx: int = _DEFAULT_OLLAMA_NUM_CTX
     ollama_timeout: int = _DEFAULT_OLLAMA_TIMEOUT
     ollama_retries: int = _DEFAULT_OLLAMA_RETRIES
+
+    # readiness — services are polled before each run, since at 08:00 after a
+    # restart they are routinely still starting.
+    readiness_attempts: int = _DEFAULT_READINESS_ATTEMPTS
+    readiness_interval: int = _DEFAULT_READINESS_INTERVAL
 
     # content
     max_body_chars: int = _DEFAULT_MAX_BODY_CHARS
@@ -98,15 +107,26 @@ class Settings:
         if gmail_max_emails < 1:
             raise ValueError(f"GMAIL_MAX_EMAILS must be at least 1, got {gmail_max_emails}")
 
+        gmail_oauth_timeout = _env_int("GMAIL_OAUTH_TIMEOUT", _DEFAULT_GMAIL_OAUTH_TIMEOUT)
         ollama_num_ctx = _env_int("OLLAMA_NUM_CTX", _DEFAULT_OLLAMA_NUM_CTX)
         ollama_timeout = _env_int("OLLAMA_TIMEOUT", _DEFAULT_OLLAMA_TIMEOUT)
-        for name, value in (("OLLAMA_NUM_CTX", ollama_num_ctx), ("OLLAMA_TIMEOUT", ollama_timeout)):
+        readiness_attempts = _env_int("READINESS_ATTEMPTS", _DEFAULT_READINESS_ATTEMPTS)
+        for name, value in (
+            ("GMAIL_OAUTH_TIMEOUT", gmail_oauth_timeout),
+            ("OLLAMA_NUM_CTX", ollama_num_ctx),
+            ("OLLAMA_TIMEOUT", ollama_timeout),
+            ("READINESS_ATTEMPTS", readiness_attempts),
+        ):
             if value < 1:
                 raise ValueError(f"{name} must be at least 1, got {value}")
 
         ollama_retries = _env_int("OLLAMA_RETRIES", _DEFAULT_OLLAMA_RETRIES)
         if ollama_retries < 0:
             raise ValueError(f"OLLAMA_RETRIES must be at least 0, got {ollama_retries}")
+
+        readiness_interval = _env_int("READINESS_INTERVAL", _DEFAULT_READINESS_INTERVAL)
+        if readiness_interval < 0:
+            raise ValueError(f"READINESS_INTERVAL must be at least 0, got {readiness_interval}")
 
         max_body_chars = _env_int("MAX_BODY_CHARS", _DEFAULT_MAX_BODY_CHARS)
         if max_body_chars < 1:
@@ -122,10 +142,13 @@ class Settings:
             ),
             gmail_oauth_port=_env_int("GMAIL_OAUTH_PORT", _DEFAULT_GMAIL_OAUTH_PORT),
             gmail_max_emails=gmail_max_emails,
+            gmail_oauth_timeout=gmail_oauth_timeout,
             ollama_url=ollama_url,
             ollama_model=os.getenv("OLLAMA_MODEL", _DEFAULT_OLLAMA_MODEL),
             ollama_num_ctx=ollama_num_ctx,
             ollama_timeout=ollama_timeout,
             ollama_retries=ollama_retries,
+            readiness_attempts=readiness_attempts,
+            readiness_interval=readiness_interval,
             max_body_chars=max_body_chars,
         )

@@ -359,6 +359,10 @@ A briefing sends **every day**, including an empty one ("All clear"), which `for
 
 Signal handles long messages, but a 200-item digest is unusable. Cap the digest at 20 items with *"…and 47 more"*; never cap urgent or tasks.
 
+### Unattended Gmail failures
+
+*Added while building this phase.* Readiness only covers Ollama and Signal, but Gmail can also need a person: an expired or revoked refresh token, or a missing `token.json`, for which `flow.run_local_server` would have waited forever under launchd. Both now raise `GmailAuthError`, which reaches the alert above. The consent flow only starts when `sys.stdin.isatty()`, with a timeout (`GMAIL_OAUTH_TIMEOUT`). Per-message fetch failures from Phase 1 also reach the briefing now, so that Gmail refusing a whole inbox cannot read as "All clear".
+
 ### Tests
 
 - Readiness retries then succeeds; exhausts and raises

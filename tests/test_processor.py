@@ -16,6 +16,7 @@ from processor_ai import (
     CATEGORIES,
     AIProcessor,
     ClassificationError,
+    ModelNotFoundError,
     OllamaRequestError,
     TriagedItem,
     TriageResult,
@@ -38,6 +39,7 @@ def _settings(**overrides) -> Settings:
 
 URL = "http://localhost:11434/api/generate"
 VERSION_URL = "http://localhost:11434/api/version"
+TAGS_URL = "http://localhost:11434/api/tags"
 
 
 @pytest.fixture(autouse=True)
@@ -109,6 +111,75 @@ class TestAIProcessorInit:
 
     def test_custom_model(self):
         assert AIProcessor(_settings(ollama_model="mistral")).model == "mistral"
+
+
+# ---------------------------------------------------------------------------
+# Tests: readiness check
+# ---------------------------------------------------------------------------
+
+def _tags(*names: str) -> dict:
+    return {"models": [{"name": name, "model": name, "size": 1} for name in names]}
+
+
+class TestCheckReady:
+    @pytest.mark.parametrize(
+        ("configured", "installed"),
+        [
+            ("llama3", "llama3:latest"),  # the default setting, as a real /api/tags spells it
+            ("llama3:latest", "llama3:latest"),
+            ("llama3:8b", "llama3:8b"),
+            ("registry.local:5000/team/llama3", "registry.local:5000/team/llama3:latest"),
+        ],
+    )
+    def test_installed_model_passes(self, requests_mock, configured, installed):
+        requests_mock.get(TAGS_URL, json=_tags("other:1", installed))
+
+        AIProcessor(_settings(ollama_model=configured)).check_ready()
+
+    @pytest.mark.parametrize(
+        ("configured", "installed"),
+        [
+            ("mistral", ["llama3:latest"]),
+            ("llama3", ["llama3:8b"]),  # a bare name means :latest, not any tag
+            ("llama3:8b", ["llama3:latest"]),
+            ("llama", ["llama3:latest"]),  # no prefix matching
+            ("mistral", []),
+        ],
+    )
+    def test_missing_model_is_named_with_how_to_fix_it(self, requests_mock, configured, installed):
+        requests_mock.get(TAGS_URL, json=_tags(*installed))
+
+        with pytest.raises(ModelNotFoundError) as exc_info:
+            AIProcessor(_settings(ollama_model=configured)).check_ready()
+
+        assert configured in str(exc_info.value)
+        assert f"ollama pull {configured}" in str(exc_info.value)
+
+    def test_null_model_list_means_nothing_installed(self, requests_mock):
+        requests_mock.get(TAGS_URL, json={"models": None})
+
+        with pytest.raises(ModelNotFoundError):
+            AIProcessor(_settings()).check_ready()
+
+    @pytest.mark.parametrize(
+        "response",
+        [
+            {"exc": requests.exceptions.ConnectionError},
+            {"exc": requests.exceptions.ConnectTimeout},
+            {"status_code": 500},
+            {"status_code": 503},
+            {"text": "starting up"},
+            {"json": {}},
+            {"json": {"models": [{"no_name": 1}]}},
+            {"json": []},
+        ],
+    )
+    def test_not_answering_properly_is_a_connection_error(self, requests_mock, response):
+        """All of these can clear up by themselves, so the gate should keep polling."""
+        requests_mock.get(TAGS_URL, **response)
+
+        with pytest.raises(ConnectionError, match="Ollama"):
+            AIProcessor(_settings()).check_ready()
 
 
 # ---------------------------------------------------------------------------
