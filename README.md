@@ -108,6 +108,7 @@ GMAIL_MAX_EMAILS=500                                   # Safety cap per run; a w
 MAX_BODY_CHARS=6000                                    # Longest cleaned email body sent to the model
 OLLAMA_NUM_CTX=8192                                    # Context window requested from Ollama per email
 OLLAMA_TIMEOUT=120                                     # Seconds to wait for Ollama per email
+OLLAMA_RETRIES=2                                       # Extra attempts per email after a failed one (1s, then 2s, apart)
 SIGNAL_API_URL=http://localhost:8080                   # Base URL of the Signal REST API container
 OLLAMA_URL=http://localhost:11434                      # Ollama BASE url — not the full /api/generate endpoint
 OLLAMA_MODEL=llama3
@@ -238,6 +239,7 @@ signalman/
 | `MAX_BODY_CHARS`          | ❌       | `6000`                                | Longest email body (after cleaning) sent to the model; longer ones are truncated |
 | `OLLAMA_NUM_CTX`          | ❌       | `8192`                                | Context window (tokens) requested from Ollama for each email |
 | `OLLAMA_TIMEOUT`          | ❌       | `120`                                 | Seconds to wait for Ollama to answer one email |
+| `OLLAMA_RETRIES`          | ❌       | `2`                                   | Extra attempts per email after a timeout, connection error, 5xx or unusable reply (never a 4xx) |
 | `SIGNAL_API_URL`          | ❌       | `http://localhost:8080`               | Base URL of the Signal REST API container              |
 | `OLLAMA_URL`              | ❌       | `http://localhost:11434`              | Ollama **base** URL (not the full API endpoint)        |
 | `OLLAMA_MODEL`            | ❌       | `llama3`                              | LLM model to use for triage                            |

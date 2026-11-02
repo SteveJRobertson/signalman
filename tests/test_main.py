@@ -317,6 +317,7 @@ class TestDryRunEndToEnd:
 
         import main
 
+        requests_mock.get("http://localhost:11434/api/version", json={"version": "0.5.0"})
         requests_mock.post(
             "http://localhost:11434/api/generate",
             json={"response": json.dumps({"category": "urgent", "summary": "Reply to recruiter"})},
@@ -328,9 +329,7 @@ class TestDryRunEndToEnd:
             main.run(settings)
 
         assert "Reply to recruiter" in capsys.readouterr().out
-        assert [r.hostname + ":" + str(r.port) for r in requests_mock.request_history] == [
-            "localhost:11434"
-        ]
+        assert {f"{r.hostname}:{r.port}" for r in requests_mock.request_history} == {"localhost:11434"}
 
 
     def test_ignored_email_is_absent_from_the_briefing(self, requests_mock, capsys):
@@ -338,6 +337,7 @@ class TestDryRunEndToEnd:
 
         import main
 
+        requests_mock.get("http://localhost:11434/api/version", json={"version": "0.5.0"})
         requests_mock.post(
             "http://localhost:11434/api/generate",
             json={"response": json.dumps({"category": "ignore", "summary": "Pills for cheap"})},

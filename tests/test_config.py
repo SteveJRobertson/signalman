@@ -166,6 +166,24 @@ class TestOllamaNumCtxAndTimeout:
                 Settings.from_env()
 
 
+class TestOllamaRetries:
+    def test_default_custom_and_invalid(self, monkeypatch):
+        _set_required(monkeypatch)
+        monkeypatch.delenv("OLLAMA_RETRIES", raising=False)
+        assert Settings.from_env().ollama_retries == 2
+
+        monkeypatch.setenv("OLLAMA_RETRIES", "5")
+        assert Settings.from_env().ollama_retries == 5
+
+        monkeypatch.setenv("OLLAMA_RETRIES", "0")  # no retries is a valid choice
+        assert Settings.from_env().ollama_retries == 0
+
+        for bad in ("abc", "-1"):
+            monkeypatch.setenv("OLLAMA_RETRIES", bad)
+            with pytest.raises(ValueError, match="OLLAMA_RETRIES"):
+                Settings.from_env()
+
+
 class TestMaxBodyChars:
     def test_default(self, monkeypatch):
         _set_required(monkeypatch)

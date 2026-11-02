@@ -15,7 +15,7 @@ Test tasks are listed separately from implementation on purpose — they are the
 | 2 · Understand every email | 9 | ✅ Done |
 | 3 · Strip the clutter | 12 | ✅ Done |
 | 4 · Bound input, new contract | 12 | ✅ Done |
-| 5 · Constrain AI output | 12 | ⬜ Not started |
+| 5 · Constrain AI output | 12 | ✅ Done |
 | 6 · Fail loudly | 11 | ⬜ Not started |
 | 7–9 · Improvement | 21 | ⬜ Outline only |
 
@@ -193,25 +193,36 @@ Also done in this phase, ahead of its listed phase: **"Surface failures in the b
 
 ---
 
-## Phase 5 · Constrain the AI's output
+## Phase 5 · Constrain the AI's output ✅
 
 ### Implementation · `processor_ai.py`
 
-- [ ] **Define the JSON schema** — `category` enum plus `summary`, both required · `S`
-- [ ] **Send `format` and `options` in the payload** · `S`
-- [ ] **Check the Ollama version** — schema-constrained `format` needs ≥ 0.5.0; fall back to `"format": "json"` with manual key validation if older · `M`
-- [ ] **Set `temperature: 0`** — the same inbox twice should give the same briefing · `S`
-- [ ] **Retry wrapper** — `ollama_retries` attempts, 1s then 2s backoff · `M`
-- [ ] **Retry only what is retryable** — timeout, connection error, 5xx, schema-validation failure. Never 4xx · `S`
-- [ ] **Add `ClassificationError`** — raised after exhaustion, caught by Phase 4's loop · `S` _(class and parse-failure path exist from Phase 4; remaining: raise it on retry exhaustion)_
-- [ ] **Guard `response.json()["response"]`** — currently an unhandled `KeyError` if the shape differs · `S`
+- [x] **Define the JSON schema** — `category` enum plus `summary`, both required · `S`
+- [x] **Send `format` and `options` in the payload** · `S`
+- [x] **Check the Ollama version** — schema-constrained `format` needs ≥ 0.5.0; fall back to `"format": "json"` with manual key validation if older · `M`
+- [x] **Set `temperature: 0`** — the same inbox twice should give the same briefing · `S`
+- [x] **Retry wrapper** — `ollama_retries` attempts, 1s then 2s backoff · `M`
+- [x] **Retry only what is retryable** — timeout, connection error, 5xx, schema-validation failure. Never 4xx · `S`
+- [x] **Add `ClassificationError`** — raised after exhaustion, caught by Phase 4's loop · `S`
+- [x] **Guard `response.json()["response"]`** — currently an unhandled `KeyError` if the shape differs · `S`
 - [x] **Surface failures in the briefing** — "⚠️ 3 emails could not be classified". A silently short briefing is the failure mode being designed out · `S` _(done in Phase 4)_
 
 ### Tests
 
-- [ ] **Request carries schema and `num_ctx`** · `S`
-- [ ] **Retry then success; exhaustion raises; 4xx not retried** · `M`
-- [ ] **One failed email does not abort a batch of ten** · `S`
+- [x] **Request carries schema and `num_ctx`** · `S`
+- [x] **Retry then success; exhaustion raises; 4xx not retried** · `M`
+- [x] **One failed email does not abort a batch of ten** · `S`
+
+---
+
+Decisions worth knowing, checked against a real Ollama 0.40.13:
+
+- **`ollama_retries` means extra attempts**, so the default of 2 gives three attempts in all, which is what "1s then 2s backoff" needs. `OLLAMA_RETRIES` was declared on `Settings` but never read from the environment until now.
+- **A retry after an unusable reply is not at temperature 0.** The plan asks for temperature 0 and for retrying unusable replies, and those two cancel out: three identical calls at 0 returned the same reply word for word, so such a retry could never change the answer. The first attempt stays at 0, so a normal run stays deterministic; only a retry after an unusable reply uses `_RETRY_TEMPERATURE` (0.3). Retries after a transport failure stay at 0.
+- **A dead Ollama still aborts the run, as Phase 4 decided.** Taken literally, "record the id and continue" after exhaustion would mean a hung Ollama costs 6 minutes per email (120s, three attempts), with nobody told for hours on a large inbox. So three emails in a row with no reply at all raise `OllamaRequestError`, which reaches Phase 6's failure path. A single slow or failing email, or any number of unusable replies, does not abort.
+- **A missing `summary` key now counts as unusable**, as the schema requires. A `summary` that is present but blank or null still falls back to the subject, since the verdict itself is fine.
+- **Exception messages no longer quote the model's reply.** It echoes email content, and those messages go to `signalman.error.log` at WARNING, which retries would now repeat. `--verbose` still shows the reply.
+- **If the version cannot be read, plain JSON mode is used.** An older server would reject a schema for every email, whereas plain JSON works everywhere, and the same validation runs either way.
 
 ---
 
