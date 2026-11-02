@@ -315,6 +315,8 @@ Wrap `_call_ollama` in a bounded retry (`ollama_retries`, default 2, 1s then 2s 
 
 Guard `response.json()["response"]` — currently an unhandled `KeyError` if the response shape differs.
 
+*As built:* a retry after an unusable reply runs at a small non-zero temperature, because at 0 the model replays the same reply exactly and the retry could never help; the first attempt stays at 0. And three emails in a row with no reply at all abort the run rather than being recorded, so that a hung Ollama reaches the failure alert instead of taking hours to get through the inbox. Details in `TASKS.md`.
+
 Surface failures in the briefing: *"⚠️ 3 emails could not be classified"*. A silently short briefing is the failure mode being designed out.
 
 ### Tests
@@ -356,6 +358,10 @@ A briefing sends **every day**, including an empty one ("All clear"), which `for
 ### Message length
 
 Signal handles long messages, but a 200-item digest is unusable. Cap the digest at 20 items with *"…and 47 more"*; never cap urgent or tasks.
+
+### Unattended Gmail failures
+
+*Added while building this phase.* Readiness only covers Ollama and Signal, but Gmail can also need a person: an expired or revoked refresh token, or a missing `token.json`, for which `flow.run_local_server` would have waited forever under launchd. Both now raise `GmailAuthError`, which reaches the alert above. The consent flow only starts when `sys.stdin.isatty()`, with a timeout (`GMAIL_OAUTH_TIMEOUT`). Per-message fetch failures from Phase 1 also reach the briefing now, so that Gmail refusing a whole inbox cannot read as "All clear".
 
 ### Tests
 

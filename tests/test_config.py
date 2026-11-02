@@ -118,6 +118,147 @@ class TestNumericCoercion:
 # Tests: OLLAMA_URL breaking-change guard
 # ---------------------------------------------------------------------------
 
+class TestGmailMaxEmails:
+    def test_default(self, monkeypatch):
+        _set_required(monkeypatch)
+        monkeypatch.delenv("GMAIL_MAX_EMAILS", raising=False)
+
+        assert Settings.from_env().gmail_max_emails == 500
+
+    def test_custom_value(self, monkeypatch):
+        _set_required(monkeypatch)
+        monkeypatch.setenv("GMAIL_MAX_EMAILS", "50")
+
+        assert Settings.from_env().gmail_max_emails == 50
+
+    def test_non_numeric_names_the_variable(self, monkeypatch):
+        _set_required(monkeypatch)
+        monkeypatch.setenv("GMAIL_MAX_EMAILS", "lots")
+
+        with pytest.raises(ValueError, match="GMAIL_MAX_EMAILS"):
+            Settings.from_env()
+
+    @pytest.mark.parametrize("bad", ["0", "-5"])
+    def test_below_one_rejected(self, monkeypatch, bad):
+        _set_required(monkeypatch)
+        monkeypatch.setenv("GMAIL_MAX_EMAILS", bad)
+
+        with pytest.raises(ValueError, match="GMAIL_MAX_EMAILS"):
+            Settings.from_env()
+
+
+class TestOllamaNumCtxAndTimeout:
+    @pytest.mark.parametrize(
+        ("var", "attr", "default"),
+        [("OLLAMA_NUM_CTX", "ollama_num_ctx", 8192), ("OLLAMA_TIMEOUT", "ollama_timeout", 120)],
+    )
+    def test_default_custom_and_invalid(self, monkeypatch, var, attr, default):
+        _set_required(monkeypatch)
+        monkeypatch.delenv(var, raising=False)
+        assert getattr(Settings.from_env(), attr) == default
+
+        monkeypatch.setenv(var, "99")
+        assert getattr(Settings.from_env(), attr) == 99
+
+        for bad in ("abc", "0", "-4"):
+            monkeypatch.setenv(var, bad)
+            with pytest.raises(ValueError, match=var):
+                Settings.from_env()
+
+
+class TestOllamaRetries:
+    def test_default_custom_and_invalid(self, monkeypatch):
+        _set_required(monkeypatch)
+        monkeypatch.delenv("OLLAMA_RETRIES", raising=False)
+        assert Settings.from_env().ollama_retries == 2
+
+        monkeypatch.setenv("OLLAMA_RETRIES", "5")
+        assert Settings.from_env().ollama_retries == 5
+
+        monkeypatch.setenv("OLLAMA_RETRIES", "0")  # no retries is a valid choice
+        assert Settings.from_env().ollama_retries == 0
+
+        for bad in ("abc", "-1"):
+            monkeypatch.setenv("OLLAMA_RETRIES", bad)
+            with pytest.raises(ValueError, match="OLLAMA_RETRIES"):
+                Settings.from_env()
+
+
+class TestReadinessAndOAuthTimeout:
+    @pytest.mark.parametrize(
+        ("var", "attr", "default"),
+        [
+            ("READINESS_ATTEMPTS", "readiness_attempts", 6),
+            ("READINESS_INTERVAL", "readiness_interval", 10),
+            ("GMAIL_OAUTH_TIMEOUT", "gmail_oauth_timeout", 300),
+        ],
+    )
+    def test_default_and_custom(self, monkeypatch, var, attr, default):
+        _set_required(monkeypatch)
+        monkeypatch.delenv(var, raising=False)
+        assert getattr(Settings.from_env(), attr) == default
+
+        monkeypatch.setenv(var, "99")
+        assert getattr(Settings.from_env(), attr) == 99
+
+    @pytest.mark.parametrize(
+        ("var", "bad"),
+        [
+            ("READINESS_ATTEMPTS", "0"),
+            ("READINESS_ATTEMPTS", "x"),
+            ("READINESS_INTERVAL", "-1"),
+            ("READINESS_INTERVAL", "x"),
+            ("GMAIL_OAUTH_TIMEOUT", "0"),
+            ("GMAIL_OAUTH_TIMEOUT", "x"),
+        ],
+    )
+    def test_invalid_values_name_the_variable(self, monkeypatch, var, bad):
+        _set_required(monkeypatch)
+        monkeypatch.setenv(var, bad)
+
+        with pytest.raises(ValueError, match=var):
+            Settings.from_env()
+
+    def test_zero_interval_is_allowed(self, monkeypatch):
+        _set_required(monkeypatch)
+        monkeypatch.setenv("READINESS_INTERVAL", "0")
+
+        assert Settings.from_env().readiness_interval == 0
+
+
+class TestMaxBodyChars:
+    def test_default(self, monkeypatch):
+        _set_required(monkeypatch)
+        monkeypatch.delenv("MAX_BODY_CHARS", raising=False)
+
+        assert Settings.from_env().max_body_chars == 6000
+
+    def test_custom_value(self, monkeypatch):
+        _set_required(monkeypatch)
+        monkeypatch.setenv("MAX_BODY_CHARS", "1500")
+
+        assert Settings.from_env().max_body_chars == 1500
+
+    def test_non_numeric_names_the_variable(self, monkeypatch):
+        _set_required(monkeypatch)
+        monkeypatch.setenv("MAX_BODY_CHARS", "big")
+
+        with pytest.raises(ValueError, match="MAX_BODY_CHARS"):
+            Settings.from_env()
+
+    @pytest.mark.parametrize("bad", ["0", "-1"])
+    def test_below_one_rejected(self, monkeypatch, bad):
+        _set_required(monkeypatch)
+        monkeypatch.setenv("MAX_BODY_CHARS", bad)
+
+        with pytest.raises(ValueError, match="MAX_BODY_CHARS"):
+            Settings.from_env()
+
+
+# ---------------------------------------------------------------------------
+# Tests: OLLAMA_URL guard
+# ---------------------------------------------------------------------------
+
 class TestOllamaUrlGuard:
     def test_base_url_accepted(self, monkeypatch):
         _set_required(monkeypatch)

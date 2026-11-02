@@ -1,18 +1,21 @@
 """Signal notifier for Signalman.
 
-Formats the AI-generated triage JSON into a human-readable message and
-delivers it via the Signal REST API running in a Docker container.
+Formats a :class:`~processor_ai.TriageResult` into a human-readable message
+and delivers it via the Signal REST API running in a Docker container. Also
+delivers the alert sent when a run fails.
 """
 
 from __future__ import annotations
 
-import logging
+from datetime import datetime
 
 import requests
 
 from config import Settings
+from processor_ai import TriageResult
 
-logger = logging.getLogger(__name__)
+_MAX_DIGEST_ITEMS = 20
+_MAX_ALERT_DETAIL_CHARS = 500
 
 
 class SignalNotifier:
@@ -28,47 +31,43 @@ class SignalNotifier:
     # Public API
     # ------------------------------------------------------------------
 
-    def send(self, triage: dict[str, list[str]]) -> None:
-        """Format *triage* and deliver it via the Signal REST API.
-
-        In dry-run mode (``settings.dry_run``), the formatted briefing is
-        printed to stdout and no Signal call is made — not even the
-        reachability check.
+    def send(self, result: TriageResult) -> None:
+        """Format *result* and deliver it via the Signal REST API.
 
         Args:
-            triage: A dict with keys ``urgent``, ``tasks``, and ``digest``,
-                    each mapping to a list of concise string descriptions
-                    (as returned by :class:`~processor_ai.AIProcessor`).
+            result: The triage verdicts, as returned by
+                :meth:`~processor_ai.AIProcessor.triage`.
+
+        In dry-run mode (``settings.dry_run``) the message is printed to
+        stdout and no HTTP request is made.
 
         Raises:
             ConnectionError: If the Signal API Docker container is unreachable.
             requests.HTTPError: If the API returns a non-2xx response.
         """
-        message = self.format_message(triage)
-
+        message = self.format_message(result)
         if self.settings.dry_run:
-            logger.info("Dry run: printing briefing instead of sending via Signal.")
             print(message)
             return
+        self.check_ready()
+        self._post(message)
 
-        self._check_reachable()
-        payload = {
-            "message": message,
-            "number": self.sender,
-            "recipients": [self.recipient],
-        }
-        response = requests.post(
-            f"{self.api_url}/v2/send",
-            json=payload,
-            timeout=30,
-        )
-        response.raise_for_status()
+    def send_alert(self, error: Exception) -> None:
+        """Tell the user a run failed, printing it instead in dry-run mode.
 
-    # ------------------------------------------------------------------
-    # Private helpers
-    # ------------------------------------------------------------------
+        There is no reachability probe first: the caller is already handling a
+        failure, and the POST itself says whether the alert got through.
 
-    def _check_reachable(self) -> None:
+        Raises:
+            requests.RequestException: If the alert could not be delivered.
+        """
+        message = self.format_alert(error)
+        if self.settings.dry_run:
+            print(message)
+            return
+        self._post(message)
+
+    def check_ready(self) -> None:
         """Verify the Signal API container is reachable before sending.
 
         Raises:
@@ -88,41 +87,77 @@ class SignalNotifier:
                 f"Signal API container returned an unexpected status at {self.api_url}: {exc}"
             ) from exc
 
-    @staticmethod
-    def format_message(triage: dict[str, list[str]]) -> str:
-        """Convert a triage dict into a clean, readable Signal message.
+    # ------------------------------------------------------------------
+    # Private helpers
+    # ------------------------------------------------------------------
 
-        Args:
-            triage: A dict with keys ``urgent``, ``tasks``, and ``digest``.
+    def _post(self, message: str) -> None:
+        """Deliver *message* to the recipient via the Signal REST API."""
+        payload = {
+            "message": message,
+            "number": self.sender,
+            "recipients": [self.recipient],
+        }
+        response = requests.post(
+            f"{self.api_url}/v2/send",
+            json=payload,
+            timeout=30,
+        )
+        response.raise_for_status()
+
+    @staticmethod
+    def format_alert(error: Exception, *, now: datetime | None = None) -> str:
+        """Convert a failure into the alert: what went wrong, and when."""
+        detail = " ".join(str(error).split())[:_MAX_ALERT_DETAIL_CHARS]
+        timestamp = (now or datetime.now().astimezone()).isoformat(timespec="seconds")
+        return f"🔴 Signalman failed\n{type(error).__name__}: {detail}\n{timestamp}"
+
+    @staticmethod
+    def format_message(result: TriageResult) -> str:
+        """Convert a :class:`TriageResult` into a clean, readable Signal message.
+
+        ``ignore`` items are never shown. Emails that could not be fetched or
+        classified are called out explicitly: a silently short briefing is
+        indistinguishable from a quiet inbox. The digest is capped, but urgent
+        and tasks never are.
+
+        An empty result still produces a message, and that is deliberate. The
+        daily briefing doubles as a heartbeat: no message by 09:00 means
+        something is wrong, even when Signal itself is what broke. Do not
+        optimise it away.
 
         Returns:
             A multi-line string ready to be sent as a Signal message.
         """
         sections: list[str] = ["📬 *Signalman Daily Briefing*\n"]
+        shown = False
 
-        urgent = triage.get("urgent", [])
-        tasks = triage.get("tasks", [])
-        digest = triage.get("digest", [])
-
-        if urgent:
-            sections.append("🚨 *Urgent*")
-            for item in urgent:
-                sections.append(f"  • {item}")
+        for heading, category in (
+            ("🚨 *Urgent*", "urgent"),
+            ("✅ *Tasks*", "tasks"),
+            ("📰 *Digest*", "digest"),
+        ):
+            items = result.by_category(category)
+            if not items:
+                continue
+            shown = True
+            sections.append(heading)
+            listed = items[:_MAX_DIGEST_ITEMS] if category == "digest" else items
+            sections.extend(f"  • {item.summary}" for item in listed)
+            if len(listed) < len(items):
+                sections.append(f"  …and {len(items) - len(listed)} more")
             sections.append("")
 
-        if tasks:
-            sections.append("✅ *Tasks*")
-            for item in tasks:
-                sections.append(f"  • {item}")
-            sections.append("")
+        failures = (
+            (result.fetch_failed_ids, "could not be fetched"),
+            (result.failed_ids, "could not be classified"),
+        )
+        for ids, problem in failures:
+            if ids:
+                noun = "email" if len(ids) == 1 else "emails"
+                sections.append(f"⚠️ {len(ids)} {noun} {problem}")
 
-        if digest:
-            sections.append("📰 *Digest*")
-            for item in digest:
-                sections.append(f"  • {item}")
-            sections.append("")
-
-        if not urgent and not tasks and not digest:
+        if not shown and not result.fetch_failed_ids and not result.failed_ids:
             sections.append("All clear – no items to report today.")
 
         return "\n".join(sections).rstrip()

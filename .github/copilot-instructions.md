@@ -56,6 +56,14 @@ Gmail API → provider_gmail.py → processor_ai.py (Ollama) → notifier_signal
 | `GMAIL_TOKEN_PATH`        | ❌       | `token.json`                          |
 | `GMAIL_CREDENTIALS_PATH`  | ❌       | `credentials.json`                    |
 | `GMAIL_OAUTH_PORT`        | ❌       | `8085`                                |
+| `GMAIL_MAX_EMAILS`        | ❌       | `500`                                 |
+| `GMAIL_OAUTH_TIMEOUT`     | ❌       | `300`                                 |
+| `MAX_BODY_CHARS`          | ❌       | `6000`                                |
+| `OLLAMA_NUM_CTX`          | ❌       | `8192`                                |
+| `OLLAMA_TIMEOUT`          | ❌       | `120`                                 |
+| `OLLAMA_RETRIES`          | ❌       | `2`                                   |
+| `READINESS_ATTEMPTS`      | ❌       | `6`                                   |
+| `READINESS_INTERVAL`      | ❌       | `10`                                  |
 | `OLLAMA_URL`              | ❌       | `http://localhost:11434`              |
 | `OLLAMA_MODEL`            | ❌       | `llama3`                              |
 
@@ -77,8 +85,18 @@ Gmail API → provider_gmail.py → processor_ai.py (Ollama) → notifier_signal
 
 ---
 
+## Reliability
+
+- Signalman runs unattended, so a failure nobody hears about is the worst kind. After settings load, any failed run must reach `main.report_failure()`, which sends a Signal alert
+- **Never suppress the empty briefing.** The daily "All clear" is a heartbeat: no message by 09:00 is how the user learns that something is wrong, even when Signal itself is what broke
+- Never let a briefing read as "All clear" when mail was dropped. Emails that could not be fetched or classified must be called out in it
+- Never block waiting for a person unless one is at a terminal. The launchd job has none, so `flow.run_local_server` must stay behind the `sys.stdin.isatty()` check in `provider_gmail._sign_in`, and must keep its timeout
+
+---
+
 ## Security
 
 - Validate all external inputs at system boundaries
 - Follow OWASP Top 10 guidelines
 - Never log credentials, tokens, or phone numbers
+- Never raise the root logger to DEBUG: Google's auth libraries log OAuth tokens at that level. `--verbose` raises only `main._VERBOSE_LOGGERS`, so add any new module with a logger there
